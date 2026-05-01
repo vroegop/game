@@ -15,6 +15,7 @@ export interface ZoneState {
 export interface GameState {
   coins: number;
   zones: Record<string, ZoneState>;
+  activeZoneId: string;
   lastSaved: number;
 }
 
@@ -36,7 +37,7 @@ export function createInitialState(): GameState {
       cartChargeMs: 0,
     };
   }
-  return { coins: 0, zones, lastSaved: now };
+  return { coins: 0, zones, activeZoneId: ZONES[0].id, lastSaved: now };
 }
 
 export function loadState(): GameState {
@@ -57,6 +58,9 @@ export function loadState(): GameState {
       if (parsed.zones[z.id].cartChargeMs === undefined) {
         parsed.zones[z.id].cartChargeMs = 0;
       }
+    }
+    if (!parsed.activeZoneId || !parsed.zones[parsed.activeZoneId]?.unlocked) {
+      parsed.activeZoneId = ZONES[0].id;
     }
     applyOfflineProgress(parsed);
     return parsed;
@@ -90,6 +94,22 @@ export function harvestPlot(state: GameState, zoneId: string, plotIndex: number,
   return true;
 }
 
+export function harvestAllRipe(state: GameState, zoneId: string, now: number): number {
+  const zoneDef = ZONES.find((z) => z.id === zoneId);
+  if (!zoneDef) return 0;
+  const zone = state.zones[zoneId];
+  if (!zone.unlocked) return 0;
+  let harvested = 0;
+  for (const plot of zone.plots) {
+    if (plotIsRipe(plot, zoneDef.growMs, now)) {
+      zone.inventory += 1;
+      plot.plantedAt = now;
+      harvested += 1;
+    }
+  }
+  return harvested;
+}
+
 export function sellAll(state: GameState, zoneId: string): number {
   const zoneDef = ZONES.find((z) => z.id === zoneId);
   if (!zoneDef) return 0;
@@ -110,6 +130,13 @@ export function unlockZone(state: GameState, zoneId: string): boolean {
   zone.unlocked = true;
   const now = Date.now();
   zone.plots.forEach((p) => (p.plantedAt = now));
+  return true;
+}
+
+export function setActiveZone(state: GameState, zoneId: string): boolean {
+  const zone = state.zones[zoneId];
+  if (!zone || !zone.unlocked) return false;
+  state.activeZoneId = zoneId;
   return true;
 }
 
@@ -134,21 +161,21 @@ export function buyCart(state: GameState, zoneId: string): boolean {
 
 export function tickCarts(state: GameState, now: number, deltaMs: number): void {
   if (deltaMs <= 0) return;
-  for (const zoneDef of ZONES) {
-    const zone = state.zones[zoneDef.id];
-    if (!zone.unlocked || zone.cartLevel <= 0) continue;
-    const interval = cartIntervalMs(zone.cartLevel);
-    zone.cartChargeMs += deltaMs;
-    while (zone.cartChargeMs >= interval) {
-      zone.cartChargeMs -= interval;
-      const ripeIdx = zone.plots.findIndex((p) => plotIsRipe(p, zoneDef.growMs, now));
-      if (ripeIdx === -1) {
-        zone.cartChargeMs = 0;
-        break;
-      }
-      zone.inventory += 1;
-      zone.plots[ripeIdx].plantedAt = now;
+  const zoneDef = ZONES.find((z) => z.id === state.activeZoneId);
+  if (!zoneDef) return;
+  const zone = state.zones[zoneDef.id];
+  if (!zone.unlocked || zone.cartLevel <= 0) return;
+  const interval = cartIntervalMs(zone.cartLevel);
+  zone.cartChargeMs += deltaMs;
+  while (zone.cartChargeMs >= interval) {
+    zone.cartChargeMs -= interval;
+    const ripeIdx = zone.plots.findIndex((p) => plotIsRipe(p, zoneDef.growMs, now));
+    if (ripeIdx === -1) {
+      zone.cartChargeMs = 0;
+      break;
     }
+    zone.inventory += 1;
+    zone.plots[ripeIdx].plantedAt = now;
   }
 }
 
@@ -168,7 +195,7 @@ function applyOfflineProgress(state: GameState): void {
         zone.inventory += 1;
       }
     }
-    if (zone.cartLevel > 0) {
+    if (zone.cartLevel > 0 && zoneDef.id === state.activeZoneId) {
       const interval = cartIntervalMs(zone.cartLevel);
       const offlineHarvests = Math.floor((cappedMs * offlineRate) / interval);
       zone.inventory += offlineHarvests;
