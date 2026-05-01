@@ -221,7 +221,7 @@ export class GameScene extends Phaser.Scene {
       const p = this.plots[i];
       p.bg.setPosition(px, py).setSize(plotSize, plotSize);
       p.fill.setPosition(px, py + plotSize / 2 - 4);
-      p.fill.width = plotSize - 8;
+      p.fill.setSize(plotSize - 8, p.fill.height || 0);
       p.icon.setPosition(px, py).setFontSize(Math.floor(plotSize * 0.4));
     }
 
@@ -392,7 +392,7 @@ export class GameScene extends Phaser.Scene {
 
   private onUnlock() {
     const zoneDef = this.activeZoneDef();
-    if (unlockZone(this.state, zoneDef.id)) {
+    if (unlockZone(this.state, zoneDef.id, Date.now())) {
       setActiveZone(this.state, zoneDef.id);
       this.spawnFloatText(this.btnUnlock.container.x, this.btnUnlock.container.y - 30, "Unlocked!", "#9ee6b8");
     }
@@ -432,7 +432,7 @@ export class GameScene extends Phaser.Scene {
       pv.bg.setFillStyle(0x1f3a1f, 1);
       pv.fill.setFillStyle(zoneDef.color, 1);
       const fullH = pv.bg.height - 8;
-      pv.fill.height = fullH * progress;
+      pv.fill.setSize(pv.bg.width - 8, fullH * progress);
       pv.icon.setText(zoneDef.emoji);
       pv.icon.setAlpha(zone.unlocked ? (ripe ? 1 : 0.4) : 0.15);
     }

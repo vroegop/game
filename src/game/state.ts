@@ -22,7 +22,7 @@ export interface GameState {
 const STORAGE_KEY = "idle-farm-save-v1";
 const CART_BASE_COST = 25;
 const CART_COST_MULT = 3;
-const CART_BASE_INTERVAL_MS = 8_000;
+const CART_BASE_INTERVAL_MS = 5_000;
 const CART_INTERVAL_REDUCTION = 0.7;
 
 export function createInitialState(): GameState {
@@ -120,7 +120,7 @@ export function sellAll(state: GameState, zoneId: string): number {
   return earned;
 }
 
-export function unlockZone(state: GameState, zoneId: string): boolean {
+export function unlockZone(state: GameState, zoneId: string, now: number): boolean {
   const zoneDef = ZONES.find((z) => z.id === zoneId);
   if (!zoneDef) return false;
   const zone = state.zones[zoneId];
@@ -128,7 +128,6 @@ export function unlockZone(state: GameState, zoneId: string): boolean {
   if (state.coins < zoneDef.unlockCost) return false;
   state.coins -= zoneDef.unlockCost;
   zone.unlocked = true;
-  const now = Date.now();
   zone.plots.forEach((p) => (p.plantedAt = now));
   return true;
 }
