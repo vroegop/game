@@ -38,9 +38,11 @@ interface ZoneTab {
 
 interface PlotView {
   index: number;
-  bg: Phaser.GameObjects.Rectangle;
-  fill: Phaser.GameObjects.Rectangle;
-  icon: Phaser.GameObjects.Text;
+  soil: Phaser.GameObjects.Image;
+  cropYoung: Phaser.GameObjects.Image;
+  cropRipe: Phaser.GameObjects.Image;
+  border: Phaser.GameObjects.Rectangle;
+  bumpFactor: number;
 }
 
 const SAVE_INTERVAL_MS = 3_000;
@@ -61,6 +63,7 @@ export class GameScene extends Phaser.Scene {
   private lastSaveAt = 0;
 
   private headerBg!: Phaser.GameObjects.Rectangle;
+  private coinIcon!: Phaser.GameObjects.Image;
   private coinText!: Phaser.GameObjects.Text;
   private rateText!: Phaser.GameObjects.Text;
 
@@ -85,6 +88,15 @@ export class GameScene extends Phaser.Scene {
     super("game");
   }
 
+  preload() {
+    this.load.svg("soil", "sprites/soil.svg", { width: 256, height: 256 });
+    this.load.svg("coin", "sprites/coin.svg", { width: 64, height: 64 });
+    for (const def of ZONES) {
+      this.load.svg(def.spriteYoung, `sprites/${def.spriteYoung}.svg`, { width: 200, height: 200 });
+      this.load.svg(def.spriteRipe, `sprites/${def.spriteRipe}.svg`, { width: 200, height: 200 });
+    }
+  }
+
   create() {
     this.state = loadState();
     this.lastSaveAt = this.time.now;
@@ -95,13 +107,16 @@ export class GameScene extends Phaser.Scene {
     this.headerBg.setStrokeStyle(2, COLOR_BORDER);
 
     this.coinText = this.add
-      .text(0, 0, "0 🪙", {
+      .text(0, 0, "0", {
         fontFamily: "system-ui, sans-serif",
         fontSize: "24px",
-        color: "#ffd966",
+        color: "#ffe89a",
         fontStyle: "bold",
       })
-      .setOrigin(0.5, 0.5);
+      .setOrigin(0, 0.5);
+
+    this.coinIcon = this.add.image(0, 0, "coin").setOrigin(0, 0.5);
+    this.coinIcon.setDisplaySize(30, 30);
 
     this.rateText = this.add
       .text(0, 0, "+0/s", {
@@ -136,14 +151,18 @@ export class GameScene extends Phaser.Scene {
     this.zoneContainer.add(this.inventoryText);
 
     for (let i = 0; i < PLOTS_PER_ZONE; i++) {
-      const bg = this.add.rectangle(0, 0, 10, 10, 0x1f3a1f, 1).setOrigin(0.5);
-      bg.setStrokeStyle(2, COLOR_BORDER);
-      bg.setInteractive({ useHandCursor: true });
-      bg.on("pointerdown", () => this.onPlotTap(i));
-      const fill = this.add.rectangle(0, 0, 10, 0, 0xffffff, 1).setOrigin(0.5, 1);
-      const icon = this.add.text(0, 0, "", { fontSize: "32px" }).setOrigin(0.5);
-      this.zoneContainer.add([bg, fill, icon]);
-      this.plots.push({ index: i, bg, fill, icon });
+      const soil = this.add.image(0, 0, "soil").setOrigin(0.5);
+      soil.setInteractive({ useHandCursor: true });
+      soil.on("pointerdown", () => this.onPlotTap(i));
+
+      const cropYoung = this.add.image(0, 0, ZONES[0].spriteYoung).setOrigin(0.5).setVisible(false);
+      const cropRipe = this.add.image(0, 0, ZONES[0].spriteRipe).setOrigin(0.5).setVisible(false);
+
+      const border = this.add.rectangle(0, 0, 10, 10, 0, 0).setOrigin(0.5);
+      border.setStrokeStyle(3, COLOR_RIPE, 0);
+
+      this.zoneContainer.add([soil, cropYoung, cropRipe, border]);
+      this.plots.push({ index: i, soil, cropYoung, cropRipe, border, bumpFactor: 1 });
     }
 
     this.cartStatusText = this.add
@@ -191,7 +210,13 @@ export class GameScene extends Phaser.Scene {
     const actionH = 80;
 
     this.headerBg.setSize(w, headerH);
-    this.coinText.setPosition(w / 2, headerH / 2 - 6);
+    const coinIconSize = 30;
+    const coinGap = 8;
+    const coinGroupW = coinIconSize + coinGap + this.coinText.width;
+    const coinStartX = w / 2 - coinGroupW / 2;
+    const groupCenterY = headerH / 2 - 6;
+    this.coinIcon.setPosition(coinStartX, groupCenterY);
+    this.coinText.setPosition(coinStartX + coinIconSize + coinGap, groupCenterY);
     this.rateText.setPosition(w / 2, headerH / 2 + 14);
 
     this.tabsContainer.setPosition(0, headerH);
@@ -208,24 +233,27 @@ export class GameScene extends Phaser.Scene {
     const gridTop = 56;
     const gridBottom = zoneH - 32;
     const gridH = gridBottom - gridTop;
-    const gridSide = Math.min(w - 32, gridH);
-    const plotSize = (gridSide - 16) / 2;
-    const gridX = (w - gridSide) / 2;
-    const gridY = gridTop + (gridH - gridSide) / 2;
+    const gridW = w - 32;
+    const plotW = (gridW - 16) / 2;
+    const plotH = Math.min((gridH - 16) / 2, plotW * 1.4);
+    const gridX = (w - gridW) / 2;
+    const usedH = plotH * 2 + 16;
+    const gridY = gridTop + Math.max(0, (gridH - usedH) / 2);
 
     for (let i = 0; i < this.plots.length; i++) {
       const col = i % 2;
       const row = Math.floor(i / 2);
-      const px = gridX + col * (plotSize + 16) + plotSize / 2;
-      const py = gridY + row * (plotSize + 16) + plotSize / 2;
+      const px = gridX + col * (plotW + 16) + plotW / 2;
+      const py = gridY + row * (plotH + 16) + plotH / 2;
       const p = this.plots[i];
-      p.bg.setPosition(px, py).setSize(plotSize, plotSize);
-      p.fill.setPosition(px, py + plotSize / 2 - 4);
-      p.fill.setSize(plotSize - 8, p.fill.height || 0);
-      p.icon.setPosition(px, py).setFontSize(Math.floor(plotSize * 0.4));
+      p.soil.setPosition(px, py);
+      p.soil.setDisplaySize(plotW, plotH);
+      p.cropYoung.setPosition(px, py + plotH * 0.1);
+      p.cropRipe.setPosition(px, py + plotH * 0.1);
+      p.border.setPosition(px, py).setSize(plotW, plotH);
     }
 
-    this.cartStatusText.setPosition(w / 2, gridY + gridSide + 8);
+    this.cartStatusText.setPosition(w / 2, gridY + plotH * 2 + 16 + 8);
 
     const actionY = h - actionH / 2;
     const buttons = [this.btnHarvest, this.btnSell, this.btnCart, this.btnUnlock];
@@ -360,7 +388,8 @@ export class GameScene extends Phaser.Scene {
     if (!zone.unlocked) return;
     const now = Date.now();
     if (harvestPlot(this.state, zoneDef.id, plotIndex, now)) {
-      this.spawnFloatText(this.plots[plotIndex].bg.x, this.plots[plotIndex].bg.y, `+1 ${zoneDef.emoji}`, "#ffe066");
+      const pv = this.plots[plotIndex];
+      this.spawnFloatText(pv.soil.x, pv.soil.y, `+1 ${zoneDef.emoji}`, "#ffe066");
       this.bumpPlot(plotIndex);
     }
   }
@@ -405,7 +434,7 @@ export class GameScene extends Phaser.Scene {
     const zoneDef = this.activeZoneDef();
     const zone = this.state.zones[zoneDef.id];
 
-    this.coinText.setText(`${formatNumber(this.state.coins)} 🪙`);
+    this.coinText.setText(`${formatNumber(this.state.coins)}`);
     this.rateText.setText(`+${formatNumber(this.computeCoinsPerSec())}/s`);
 
     for (const tab of this.tabs) {
@@ -424,17 +453,43 @@ export class GameScene extends Phaser.Scene {
     this.zoneTitle.setText(zoneDef.name);
     this.inventoryText.setText(`${zone.inventory} ${zoneDef.emoji} in basket`);
 
+    const pulsePhase = (Math.sin(this.time.now / 220) + 1) / 2;
+    const sample = this.plots[0]?.soil;
+    const plotSpan = Math.min(sample?.displayWidth ?? 100, sample?.displayHeight ?? 100);
+    const cropBaseScale = (plotSpan * 0.75) / 200;
+
     for (const pv of this.plots) {
       const plot = zone.plots[pv.index];
       const ripe = plotIsRipe(plot, zoneDef.growMs, now);
       const progress = plotProgress(plot, zoneDef.growMs, now);
-      pv.bg.setStrokeStyle(2, ripe ? COLOR_RIPE : COLOR_BORDER, 1);
-      pv.bg.setFillStyle(0x1f3a1f, 1);
-      pv.fill.setFillStyle(zoneDef.color, 1);
-      const fullH = pv.bg.height - 8;
-      pv.fill.setSize(pv.bg.width - 8, fullH * progress);
-      pv.icon.setText(zoneDef.emoji);
-      pv.icon.setAlpha(zone.unlocked ? (ripe ? 1 : 0.4) : 0.15);
+
+      pv.soil.setAlpha(zone.unlocked ? 1 : 0.4);
+      pv.cropYoung.setTexture(zoneDef.spriteYoung);
+      pv.cropRipe.setTexture(zoneDef.spriteRipe);
+
+      if (!zone.unlocked) {
+        pv.cropYoung.setVisible(false);
+        pv.cropRipe.setVisible(false);
+        pv.border.setStrokeStyle(3, COLOR_RIPE, 0);
+        continue;
+      }
+
+      const youngAlpha = Phaser.Math.Clamp(1 - progress * 1.4, 0, 1);
+      const ripeAlpha = Phaser.Math.Clamp((progress - 0.35) * 1.7, 0, 1);
+      const growthScale = cropBaseScale * (0.35 + 0.65 * Math.min(progress * 1.4, 1));
+      const bumped = growthScale * pv.bumpFactor;
+      pv.bumpFactor = Phaser.Math.Linear(pv.bumpFactor, 1, 0.18);
+
+      pv.cropYoung.setVisible(youngAlpha > 0.02);
+      pv.cropYoung.setAlpha(youngAlpha);
+      pv.cropYoung.setScale(bumped);
+
+      pv.cropRipe.setVisible(ripeAlpha > 0.02);
+      pv.cropRipe.setAlpha(ripeAlpha);
+      pv.cropRipe.setScale(bumped);
+
+      const borderAlpha = ripe ? 0.45 + 0.55 * pulsePhase : 0;
+      pv.border.setStrokeStyle(3, COLOR_RIPE, borderAlpha);
     }
 
     if (!zone.unlocked) {
@@ -483,8 +538,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private bumpPlot(idx: number) {
-    const pv = this.plots[idx];
-    this.tweens.add({ targets: pv.icon, scale: 1.4, duration: 80, yoyo: true, ease: "Sine.easeOut" });
+    this.plots[idx].bumpFactor = 1.35;
   }
 
   private pulseCoins() {

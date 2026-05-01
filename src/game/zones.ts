@@ -6,6 +6,8 @@ export interface ZoneDef {
   sellPrice: number;
   unlockCost: number;
   color: number;
+  spriteYoung: string;
+  spriteRipe: string;
 }
 
 export const ZONES: ZoneDef[] = [
@@ -17,6 +19,8 @@ export const ZONES: ZoneDef[] = [
     sellPrice: 1,
     unlockCost: 0,
     color: 0xc9a648,
+    spriteYoung: "wheat-young",
+    spriteRipe: "wheat-ripe",
   },
   {
     id: "carrots",
@@ -26,6 +30,8 @@ export const ZONES: ZoneDef[] = [
     sellPrice: 5,
     unlockCost: 50,
     color: 0xe07a3c,
+    spriteYoung: "carrot-young",
+    spriteRipe: "carrot-ripe",
   },
 ];
 
