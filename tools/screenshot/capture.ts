@@ -19,7 +19,7 @@ const VIEWPORTS: Viewport[] = [
 const SCREENSHOTS_DIR = "screenshots";
 const DEV_PORT = 5179;
 const READY_TIMEOUT_MS = 30_000;
-const SETTLE_MS = 2500;
+const SETTLE_MS = 6500;
 
 function timestamp(): string {
   const d = new Date();
