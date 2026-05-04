@@ -749,7 +749,7 @@ export const GEM_SHOP_ITEMS: GemShopItem[] = [
   {
     id: "phantomHarvester",
     name: "Phantom Harvester",
-    description: "Carts run on every zone (half rate inactive)",
+    description: "Inactive zones run at full rate (was 50%)",
     cost: GEM_SHOP_COSTS.phantomHarvester,
     ...buyOnce(
       (s) => {
@@ -880,25 +880,20 @@ export function tickCarts(state: GameState, now: number, deltaMs: number): void 
   pruneBoosts(state, now);
   tickWeather(state, now);
 
-  const tickZones = state.gemUpgrades.phantomHarvester
-    ? ZONES.map((z) => z.id)
-    : [state.activeZoneId];
-
   const dt = (deltaMs / 1000) * speed;
+  const inactiveBase = state.gemUpgrades.phantomHarvester ? 1 : 0.5;
 
-  for (const zoneId of tickZones) {
-    const zoneDef = ZONES.find((z) => z.id === zoneId);
-    if (!zoneDef) continue;
-    const zone = state.zones[zoneId];
+  for (const zoneDef of ZONES) {
+    const zone = state.zones[zoneDef.id];
     if (!zone.unlocked) continue;
-    const isActive = zoneId === state.activeZoneId;
+    const isActive = zoneDef.id === state.activeZoneId;
 
     const r = cartRadius(zone.cartLevel);
     const r2 = r * r;
     const cartSpd = cartSpeed(zone.cartLevel, state);
     const grow = effectiveGrowMs(zoneDef.growMs, zone.growthLevel, state, now);
     const yieldPer = effectiveYield(zone.yieldLevel, state, now);
-    const inactiveScale = isActive ? 1 : 0.5;
+    const inactiveScale = isActive ? 1 : inactiveBase;
 
     for (const cart of zone.carts) {
       cart.x += cart.vx * dt * inactiveScale;
@@ -942,7 +937,7 @@ export function tickCarts(state: GameState, now: number, deltaMs: number): void 
         if (dx * dx + dy * dy <= r2) {
           spot.plantedAt = now;
           zone.inventory += yieldPer * inactiveScale;
-          maybeDropGem(state, zoneId, now);
+          maybeDropGem(state, zoneDef.id, now);
           if (state.gemUpgrades.luckyCart && Math.random() < 0.03) {
             state.gems += 1;
           }
@@ -1004,14 +999,15 @@ function applyOfflineProgress(state: GameState): void {
         zone.inventory += yieldPer;
       }
     }
-    const isPhantom = state.gemUpgrades.phantomHarvester || zoneDef.id === state.activeZoneId;
-    if (isPhantom && zone.cartLevel > 0) {
+    if (zone.cartLevel > 0) {
       const r = cartRadius(zone.cartLevel);
       const speed = cartSpeed(zone.cartLevel, state);
       const sweptAreaPerSec = 2 * r * speed;
       const cropDensity = zone.spots.length;
       const harvestsPerSec = sweptAreaPerSec * cropDensity * 0.04;
-      const inactiveScale = zoneDef.id === state.activeZoneId ? 1 : 0.5;
+      const isActive = zoneDef.id === state.activeZoneId;
+      const inactiveBase = state.gemUpgrades.phantomHarvester ? 1 : 0.5;
+      const inactiveScale = isActive ? 1 : inactiveBase;
       const offlineHarvests = Math.floor(
         (cappedMs / 1000) * harvestsPerSec * cartCountFor(zone.cartLevel) * 0.5 * inactiveScale,
       );
