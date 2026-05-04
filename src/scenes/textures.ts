@@ -72,11 +72,14 @@ export function generatePixelTextures(scene: Phaser.Scene): void {
   generatePixelButton(scene, "tab-bg-locked", 0x282828, 0x3a3a3a, 0x141414);
 
   generatePixelPanel(scene, "panel-bg", 0x223422, 0x3a5a3a, 0x101a10);
+  generatePixelPanel(scene, "modal-bg", 0x162616, 0x3a5a3a, 0x080e08);
   generateRipeBorder(scene, "ripe-border");
   generateGrass(scene, "grass-bg");
   generateSoilBg(scene, "soil-bg");
   generateFieldFrame(scene, "field-frame");
   generateDragRing(scene, "drag-ring");
+  generateGem(scene, "gem");
+  generateMenuIcon(scene, "menu-icon");
 }
 
 function generatePlotTile(scene: Phaser.Scene, key: string, drawCrops: (g: Phaser.GameObjects.Graphics) => void): void {
@@ -609,6 +612,67 @@ function generateSoilBg(scene: Phaser.Scene, key: string): void {
   ];
   g.fillStyle(0xc89968, 1);
   for (const [x, y] of dotsLight) g.fillRect(x, y, 1, 1);
+  g.generateTexture(key, W, H);
+  g.destroy();
+}
+
+function generateGem(scene: Phaser.Scene, key: string): void {
+  const g = scene.add.graphics();
+  const W = 16;
+  const H = 16;
+  g.fillStyle(0x000000, 0);
+  g.fillRect(0, 0, W, H);
+  // Gem shape (diamond/octagon-ish)
+  g.fillStyle(0x40e0e0, 1);
+  g.fillRect(5, 2, 6, 1);
+  g.fillRect(3, 3, 10, 2);
+  g.fillRect(2, 5, 12, 4);
+  g.fillRect(3, 9, 10, 2);
+  g.fillRect(5, 11, 6, 2);
+  g.fillRect(7, 13, 2, 1);
+  // Highlight
+  g.fillStyle(0xa0f8f8, 1);
+  g.fillRect(5, 3, 4, 1);
+  g.fillRect(4, 4, 2, 1);
+  g.fillRect(3, 5, 2, 2);
+  // Shadow
+  g.fillStyle(0x208080, 1);
+  g.fillRect(11, 5, 2, 4);
+  g.fillRect(10, 9, 2, 1);
+  g.fillRect(8, 10, 2, 1);
+  // Outline
+  g.fillStyle(0x104040, 1);
+  g.fillRect(4, 2, 1, 1);
+  g.fillRect(11, 2, 1, 1);
+  g.fillRect(2, 3, 1, 2);
+  g.fillRect(13, 3, 1, 2);
+  g.fillRect(1, 5, 1, 4);
+  g.fillRect(14, 5, 1, 4);
+  g.fillRect(2, 9, 1, 2);
+  g.fillRect(13, 9, 1, 2);
+  g.fillRect(4, 11, 1, 1);
+  g.fillRect(11, 11, 1, 1);
+  g.fillRect(5, 13, 1, 1);
+  g.fillRect(10, 13, 1, 1);
+  g.fillRect(7, 14, 2, 1);
+  g.generateTexture(key, W, H);
+  g.destroy();
+}
+
+function generateMenuIcon(scene: Phaser.Scene, key: string): void {
+  const g = scene.add.graphics();
+  const W = 16;
+  const H = 16;
+  g.fillStyle(0x000000, 0);
+  g.fillRect(0, 0, W, H);
+  g.fillStyle(0xe8f5e8, 1);
+  g.fillRect(3, 4, 10, 2);
+  g.fillRect(3, 7, 10, 2);
+  g.fillRect(3, 10, 10, 2);
+  g.fillStyle(0x6a9a6a, 1);
+  g.fillRect(3, 6, 10, 1);
+  g.fillRect(3, 9, 10, 1);
+  g.fillRect(3, 12, 10, 1);
   g.generateTexture(key, W, H);
   g.destroy();
 }

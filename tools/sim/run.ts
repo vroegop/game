@@ -183,7 +183,7 @@ function run(strategy: Strategy, durationMs: number): RunResult {
 
     const activeDef = ZONES.find((z) => z.id === state.activeZoneId)!;
     const activeZone = state.zones[activeDef.id];
-    const grow = effectiveGrowMs(activeDef.growMs, activeZone.growthLevel);
+    const grow = effectiveGrowMs(activeDef.growMs, activeZone.growthLevel, state, now);
 
     if (activeZone.cartLevel === 0) {
       if (activeZone.spots.some((p) => plotIsRipe(p, grow, now))) {
@@ -194,7 +194,7 @@ function run(strategy: Strategy, durationMs: number): RunResult {
         }
       }
     } else if (now - lastDrag >= strategy.dragIntervalMs) {
-      const n = harvestInRadius(state, activeDef.id, 0.5, 0.5, dragRadiusFn(state.dragRadiusLevel), now);
+      const n = harvestInRadius(state, activeDef.id, 0.5, 0.5, dragRadiusFn(state), now);
       if (n > 0) {
         taps++;
         lastDrag = now;
@@ -202,7 +202,7 @@ function run(strategy: Strategy, durationMs: number): RunResult {
       }
     }
 
-    const priceMult = effectivePriceMult(activeZone.priceLevel);
+    const priceMult = effectivePriceMult(activeZone.priceLevel, state, now);
     const sellThreshold = Math.max(10, activeDef.unlockCost * 0.3);
     if (activeZone.inventory * activeDef.sellPrice * priceMult >= sellThreshold) {
       const earned = sellAll(state, activeDef.id);

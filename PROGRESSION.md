@@ -162,7 +162,117 @@ This document is the contract. Implementation in main repo:
 | **6** Global | Drag radius, offline cap, coin multiplier (next session) | 🟡 |
 | **7** Prestige | Heirloom Seeds, specializations | ⏳ |
 
-## 8. What this plan deliberately *avoids*
+## 8. Gem economy and live-ops layer
+
+A second currency, **Gems**, opens a parallel economy that handles
+quality-of-life, premium boosts, and game-changers. The base game
+must remain fully playable and completable without spending a
+single gem.
+
+### 8.1 Gem sources
+
+- **Lucky harvest (primary, free):** every harvested spot has a tiny
+  chance to drop a gem. Base rate 0.05 % per crop, scales with crop
+  tier (~0.5 % at tier 12). The Scarecrow greenhouse upgrade and
+  Lucky Charm gem upgrade both increase this.
+- **Daily login (post v1):** small fixed amount per day.
+- **Achievements (post v1):** one-time rewards for milestones.
+- **Premium purchase (post launch):** real money. Always strictly
+  optional and never the cheapest way to progress.
+
+### 8.2 Gem shop categories
+
+| Category | Examples |
+|---|---|
+| **Coin packs** | 1K coins / 5K coins / instant 10× current sell |
+| **Boosters** | 5-min Super Fertilizer, 10-min Sunshine, 1-h Festival |
+| **QOL upgrades** | Auto-sell at threshold, larger drag preview, offline cap +24 h |
+| **Game-changers** | Magnet Drag, Combo Multiplier, Lucky Cart, Game Speed 2× |
+| **Cosmetics** | Golden cart skin, festive crop tints |
+
+### 8.3 Cool gem-buyable game-changers (proposed)
+
+| Item | Effect | Gem cost |
+|---|---|---|
+| **Magnet Drag** | While dragging, ripe crops are pulled toward the touch point — effective reach grows without changing visual radius. | 50 |
+| **Combo Multiplier** | Chaining harvests within 2 s adds +5 % per combo step, max +200 %. Resets on idle. | 75 |
+| **Lucky Cart** | Cart has a 3 % chance to find a gem instead of (or in addition to) a crop. | 100 |
+| **Game Speed 1.5×** | All timers run 50 % faster, permanently. Stacks once at 2×. | 200 |
+| **Auto-Seller** | Inventory auto-sells when basket exceeds threshold. Threshold is configurable. | 60 |
+| **Phantom Harvester** | Carts continue ticking on every zone, not just the active one. Half rate on inactive zones. | 150 |
+| **Time Garden** | Adds a small bonus zone where time runs 10× faster, with a single random ripe crop tier. | 300 |
+| **Weather Insurance** | Bad weather no longer applies to your fields (only the good kinds). | 120 |
+| **Lucky Charm** | +100 % gem drop rate. Stackable up to 3×. | 80 each |
+| **Heirloom Seeds** | 1 % chance harvested crop is one tier higher. | 250 |
+| **Offline Cap +24h** | Stack from base 8 h to 72 h, in 24-hour increments (max 3 stacks). | 100 each |
+
+Each item is a one-time permanent purchase except the offline cap
+and Lucky Charm stacks.
+
+## 9. Temporary boosts and weather
+
+### 9.1 Player-triggered boosts
+
+Earned occasionally for free, buyable for gems, fully optional.
+
+| Boost | Effect | Duration |
+|---|---|---|
+| **Super Fertilizer** | +100 % yield | 5 min |
+| **Sunshine** | +100 % growth speed | 5 min |
+| **Market Day** | +100 % sell price | 5 min |
+| **Lucky Day** | +500 % gem drop rate | 1 h |
+| **Bountiful Harvest** | Next harvest only: +200 % yield | one shot |
+
+Active boosts are visible in the HUD with a countdown bar.
+
+### 9.2 Ambient weather (passive)
+
+Weather changes randomly every 8–15 min. Always one weather at a
+time; effects layer with player-triggered boosts.
+
+| Weather | Effect | Frequency |
+|---|---|---|
+| **Sunny** (default) | baseline | ~50 % |
+| **Rain** | +25 % growth speed | ~25 % |
+| **Drought** | −25 % growth speed | ~10 % |
+| **Festival** | +30 % sell price | ~10 % |
+| **Storm** | growth halts; next harvest +100 % yield | ~5 % |
+
+The Weather Insurance gem upgrade prevents Drought and Storm
+penalties from applying to you.
+
+## 10. Greenhouse — permanent percentage boosts
+
+Coin-buyable global upgrades, a separate tab from per-zone
+upgrades. Effects stack additively across all zones.
+
+| Upgrade | Effect per level | Max | Base cost | Mult |
+|---|---|---|---|---|
+| **Greenhouse Glass** | +5 % grow speed (all zones) | 20 | 500 | 1.65 |
+| **Sprinkler Network** | +1 baseline yield (all zones) | 10 | 800 | 1.8 |
+| **Compost Bin** | +5 % sell price (all zones) | 20 | 1 200 | 1.7 |
+| **Scarecrow** | +50 % gem drop rate (multiplicative) | 5 | 5 000 (gem) | × 2 |
+| **Auto-Replanter** | Spots replant 1 s faster after harvest | 10 | 600 | 1.7 |
+
+These are tuned to be reachable mid-game. Maxing all greenhouse
+upgrades represents a significant late-game investment but doesn't
+gate progress.
+
+## 11. Menu structure
+
+The top bar has a single ☰ button that opens a modal menu with
+tabs. The action bar at the bottom shrinks to just the **Sell**
+button (the most-used action).
+
+Tabs:
+1. **🌾 Upgrades** — per-zone cart, yield, growth, price, plus the
+   global drag radius
+2. **🌿 Greenhouse** — permanent global percentage boosts
+3. **⚡ Boosts** — owned consumable boosts; tap to activate
+4. **💎 Shop** — buy gems → upgrades, QOL, cosmetics
+5. **📊 Stats** *(post v1)* — total earned, biggest harvest, etc.
+
+
 
 - **No pay-to-win.** Sun Drops (premium currency, post v1) only buy
   cosmetics, time skips, and chest rerolls — never raw progression.
