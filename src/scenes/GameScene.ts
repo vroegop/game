@@ -42,6 +42,17 @@ import { generatePixelTextures, pickCropSpriteKey } from "./textures";
 
 type MenuTab = "upgrades" | "greenhouse" | "boosts" | "shop";
 
+interface MenuRow {
+  id: string;
+  icon: string;
+  name: string;
+  description: string;
+  stat: string;
+  cost: string;
+  canBuy: boolean;
+  onBuy: () => void;
+}
+
 interface IconButton {
   container: Phaser.GameObjects.Container;
   bg: Phaser.GameObjects.Image;
@@ -73,7 +84,8 @@ interface CartView {
 }
 
 const SAVE_INTERVAL_MS = 3_000;
-const PIXEL_FONT = '"Courier New", monospace';
+const UI_FONT = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
+const NUM_FONT = "'SF Mono', Menlo, Consolas, monospace";
 
 const COLOR_RIPE_TEXT = "#ffe066";
 const COLOR_GAIN = "#9ee6b8";
@@ -128,6 +140,14 @@ export class GameScene extends Phaser.Scene {
   private menuTabs: { id: MenuTab; container: Phaser.GameObjects.Container; bg: Phaser.GameObjects.Image; label: Phaser.GameObjects.Text }[] = [];
   private menuRowsContainer!: Phaser.GameObjects.Container;
 
+  private tooltipContainer!: Phaser.GameObjects.Container;
+  private tooltipBg!: Phaser.GameObjects.Rectangle;
+  private tooltipTitle!: Phaser.GameObjects.Text;
+  private tooltipText!: Phaser.GameObjects.Text;
+  private tooltipTween: Phaser.Tweens.Tween | null = null;
+  private tooltipVisibleId: string | null = null;
+  private tooltipPos = { x: 0, y: 0 };
+
   private fieldRect: FieldRect = { x: 0, y: 0, w: 100, h: 100 };
 
   constructor() {
@@ -155,7 +175,7 @@ export class GameScene extends Phaser.Scene {
     this.coinIcon.setScale(2);
     this.coinText = this.add
       .text(0, 0, "0", {
-        fontFamily: PIXEL_FONT,
+        fontFamily: UI_FONT,
         fontSize: "20px",
         color: "#ffe89a",
         fontStyle: "bold",
@@ -166,7 +186,7 @@ export class GameScene extends Phaser.Scene {
     this.gemIcon.setScale(2);
     this.gemText = this.add
       .text(0, 0, "0", {
-        fontFamily: PIXEL_FONT,
+        fontFamily: UI_FONT,
         fontSize: "20px",
         color: "#a0f0f0",
         fontStyle: "bold",
@@ -175,7 +195,7 @@ export class GameScene extends Phaser.Scene {
 
     this.weatherText = this.add
       .text(0, 0, "", {
-        fontFamily: PIXEL_FONT,
+        fontFamily: UI_FONT,
         fontSize: "10px",
         color: "#a8c8a8",
       })
@@ -183,7 +203,7 @@ export class GameScene extends Phaser.Scene {
 
     this.rateText = this.add
       .text(0, 0, "+0/s", {
-        fontFamily: PIXEL_FONT,
+        fontFamily: UI_FONT,
         fontSize: "10px",
         color: "#a8c8a8",
       })
@@ -198,7 +218,7 @@ export class GameScene extends Phaser.Scene {
 
     this.titleText = this.add
       .text(0, 0, "", {
-        fontFamily: PIXEL_FONT,
+        fontFamily: UI_FONT,
         fontSize: "16px",
         color: "#e8f5d8",
         fontStyle: "bold",
@@ -207,7 +227,7 @@ export class GameScene extends Phaser.Scene {
 
     this.statusText = this.add
       .text(0, 0, "", {
-        fontFamily: PIXEL_FONT,
+        fontFamily: UI_FONT,
         fontSize: "11px",
         color: "#9ec79e",
       })
@@ -226,6 +246,7 @@ export class GameScene extends Phaser.Scene {
     this.input.on("pointerup", this.onPointerUp, this);
 
     this.buildMenu();
+    this.buildTooltip();
 
     this.scale.on("resize", this.layout, this);
     this.layout();
@@ -259,20 +280,18 @@ export class GameScene extends Phaser.Scene {
     this.headerBg.setDisplaySize(w, headerH);
     const iconSize = 30;
     const innerGap = 6;
-    const groupGap = 18;
-    const menuSize = 40;
+    const groupGap = 24;
     const groupY = Math.floor(headerH / 2 - 8);
 
     const coinW = iconSize + innerGap + this.coinText.width;
     const gemW = iconSize + innerGap + this.gemText.width;
     const totalW = coinW + groupGap + gemW;
-    const startX = Math.floor((w - totalW - menuSize - 12) / 2);
+    const startX = Math.floor((w - totalW) / 2);
     this.coinIcon.setPosition(startX, groupY);
     this.coinText.setPosition(startX + iconSize + innerGap, groupY);
     const gemX = startX + coinW + groupGap;
     this.gemIcon.setPosition(gemX, groupY);
     this.gemText.setPosition(gemX + iconSize + innerGap, groupY);
-    this.placeIconButton(this.menuButton, w - 8 - menuSize / 2, Math.floor(headerH / 2), menuSize);
 
     this.weatherText.setPosition(Math.floor(w / 2), Math.floor(headerH / 2 + 10));
     this.rateText.setPosition(Math.floor(w / 2), Math.floor(headerH / 2 + 22));
@@ -301,12 +320,17 @@ export class GameScene extends Phaser.Scene {
     this.btnUnlock.container.setVisible(false);
 
     const sellSize = 72;
+    const menuSize = 60;
     const actionY = h - Math.floor(actionH / 2);
-    this.placeIconButton(this.btnSell, Math.floor(w / 2), actionY, sellSize);
+    const totalActionW = sellSize + 16 + menuSize;
+    const actionStartX = Math.floor((w - totalActionW) / 2);
+    this.placeIconButton(this.btnSell, actionStartX + sellSize / 2, actionY, sellSize);
+    this.placeIconButton(this.menuButton, actionStartX + sellSize + 16 + menuSize / 2, actionY, menuSize);
 
     this.layoutSpots();
     this.layoutCarts();
     this.layoutMenu();
+    this.layoutTooltip();
   };
 
   private layoutTabs(w: number, tabsH: number) {
@@ -337,7 +361,7 @@ export class GameScene extends Phaser.Scene {
     const icon = this.add.text(0, 0, def.emoji, { fontSize: "24px" }).setOrigin(0.5);
     const price = this.add
       .text(0, 14, "", {
-        fontFamily: PIXEL_FONT,
+        fontFamily: UI_FONT,
         fontSize: "10px",
         color: "#ffe89a",
         fontStyle: "bold",
@@ -355,7 +379,7 @@ export class GameScene extends Phaser.Scene {
     bg.setInteractive({ useHandCursor: true });
     const iconText = this.add
       .text(0, -2, label, {
-        fontFamily: PIXEL_FONT,
+        fontFamily: UI_FONT,
         fontSize: "22px",
         color: "#ffffff",
         fontStyle: "bold",
@@ -363,7 +387,7 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5);
     const badge = this.add
       .text(0, 16, "", {
-        fontFamily: PIXEL_FONT,
+        fontFamily: UI_FONT,
         fontSize: "11px",
         color: "#ffffff",
         fontStyle: "bold",
@@ -744,7 +768,7 @@ export class GameScene extends Phaser.Scene {
 
     const title = this.add
       .text(0, 0, "MENU", {
-        fontFamily: PIXEL_FONT,
+        fontFamily: UI_FONT,
         fontSize: "20px",
         color: "#e8f5d8",
         fontStyle: "bold",
@@ -758,28 +782,38 @@ export class GameScene extends Phaser.Scene {
     (this.menuOverlay as any).closeBtn = closeBtn;
 
     const tabIds: MenuTab[] = ["upgrades", "greenhouse", "boosts", "shop"];
-    const tabLabels: Record<MenuTab, string> = {
-      upgrades: "FARM",
-      greenhouse: "GHSE",
-      boosts: "BOOST",
-      shop: "SHOP",
+    const tabIcons: Record<MenuTab, string> = {
+      upgrades: "🌾",
+      greenhouse: "🏠",
+      boosts: "⚡",
+      shop: "💎",
+    };
+    const tabNames: Record<MenuTab, string> = {
+      upgrades: "Farm Upgrades",
+      greenhouse: "Greenhouse",
+      boosts: "Boosts",
+      shop: "Gem Shop",
     };
     for (const id of tabIds) {
       const c = this.add.container(0, 0);
       const bg = this.add.image(0, 0, "tab-bg").setOrigin(0.5);
       bg.setInteractive({ useHandCursor: true });
-      bg.on("pointerdown", () => {
-        this.menuTab = id;
-        this.refreshMenu();
-      });
       const label = this.add
-        .text(0, 0, tabLabels[id], {
-          fontFamily: PIXEL_FONT,
-          fontSize: "12px",
-          color: "#e8f5d8",
-          fontStyle: "bold",
+        .text(0, 0, tabIcons[id], {
+          fontFamily: UI_FONT,
+          fontSize: "26px",
         })
         .setOrigin(0.5);
+      bg.on("pointerdown", () => {
+        if (this.menuTab === id) {
+          this.showTooltip(`tab-${id}`, tabNames[id], "", c.x, c.y);
+          return;
+        }
+        this.menuTab = id;
+        this.hideTooltip();
+        this.refreshMenu();
+        this.showTooltip(`tab-${id}`, tabNames[id], "", c.x, c.y);
+      });
       c.add([bg, label]);
       this.menuOverlay.add(c);
       this.menuTabs.push({ id, container: c, bg, label });
@@ -787,6 +821,115 @@ export class GameScene extends Phaser.Scene {
 
     this.menuRowsContainer = this.add.container(0, 0);
     this.menuOverlay.add(this.menuRowsContainer);
+  }
+
+  private buildTooltip() {
+    this.tooltipContainer = this.add.container(0, 0);
+    this.tooltipContainer.setVisible(false);
+    this.tooltipContainer.setDepth(220);
+
+    this.tooltipBg = this.add.rectangle(0, 0, 200, 60, 0x0a1a0a, 0.96).setOrigin(0.5);
+    this.tooltipBg.setStrokeStyle(2, 0x6aaa6a);
+
+    this.tooltipTitle = this.add
+      .text(0, 0, "", {
+        fontFamily: UI_FONT,
+        fontSize: "15px",
+        color: "#ffe89a",
+        fontStyle: "bold",
+      })
+      .setOrigin(0.5, 0);
+
+    this.tooltipText = this.add
+      .text(0, 0, "", {
+        fontFamily: UI_FONT,
+        fontSize: "12px",
+        color: "#cde6cd",
+        align: "center",
+        wordWrap: { width: 280 },
+      })
+      .setOrigin(0.5, 0);
+
+    this.tooltipContainer.add([this.tooltipBg, this.tooltipTitle, this.tooltipText]);
+  }
+
+  private showTooltip(id: string, title: string, body: string, anchorX: number, anchorY: number) {
+    if (this.tooltipVisibleId === id) {
+      this.hideTooltip();
+      return;
+    }
+    if (this.tooltipTween) {
+      this.tooltipTween.stop();
+      this.tooltipTween = null;
+    }
+
+    this.tooltipVisibleId = id;
+    this.tooltipTitle.setText(title);
+    this.tooltipText.setText(body);
+
+    const padX = 18;
+    const padY = 14;
+    const hasTitle = title.length > 0;
+    const hasBody = body.length > 0;
+    const titleH = hasTitle ? this.tooltipTitle.height : 0;
+    const bodyH = hasBody ? this.tooltipText.height : 0;
+    const inner = titleH + (hasTitle && hasBody ? 6 : 0) + bodyH;
+    const totalH = inner + padY * 2;
+    const widest = Math.max(this.tooltipTitle.width, this.tooltipText.width);
+    const totalW = Math.max(140, Math.min(300, widest + padX * 2));
+
+    this.tooltipBg.setSize(totalW, totalH);
+
+    let cursor = -inner / 2;
+    if (hasTitle) {
+      this.tooltipTitle.setY(cursor);
+      cursor += titleH + (hasBody ? 6 : 0);
+    }
+    if (hasBody) {
+      this.tooltipText.setY(cursor);
+    }
+
+    this.tooltipPos = { x: anchorX, y: anchorY };
+    this.layoutTooltip();
+    this.tooltipContainer.setVisible(true);
+    this.tooltipContainer.setAlpha(1);
+
+    this.tooltipTween = this.tweens.add({
+      targets: this.tooltipContainer,
+      alpha: 0,
+      delay: 1600,
+      duration: 400,
+      onComplete: () => {
+        this.tooltipContainer.setVisible(false);
+        this.tooltipVisibleId = null;
+        this.tooltipTween = null;
+      },
+    });
+  }
+
+  private hideTooltip() {
+    if (this.tooltipTween) {
+      this.tooltipTween.stop();
+      this.tooltipTween = null;
+    }
+    this.tooltipContainer.setVisible(false);
+    this.tooltipVisibleId = null;
+  }
+
+  private layoutTooltip() {
+    if (!this.tooltipContainer) return;
+    const w = this.scale.width;
+    const h = this.scale.height;
+    const tw = this.tooltipBg.width;
+    const th = this.tooltipBg.height;
+    let x = this.tooltipPos.x;
+    let y = this.tooltipPos.y - th / 2 - 28;
+    if (y - th / 2 < 12) y = this.tooltipPos.y + th / 2 + 28;
+    if (x - tw / 2 < 12) x = tw / 2 + 12;
+    if (x + tw / 2 > w - 12) x = w - tw / 2 - 12;
+    if (y - th / 2 < 12) y = th / 2 + 12;
+    if (y + th / 2 > h - 12) y = h - th / 2 - 12;
+    this.tooltipContainer.setPosition(x, y);
   }
 
   private toggleMenu() {
@@ -802,33 +945,38 @@ export class GameScene extends Phaser.Scene {
     const h = this.scale.height;
     const overlay = this.menuOverlay as any;
     overlay.dim.setSize(w, h);
-    const panelMargin = 16;
+    const panelMargin = 14;
     const panelW = w - panelMargin * 2;
     const panelH = h - panelMargin * 2;
     const panelX = panelMargin;
     const panelY = panelMargin;
     overlay.panel.setPosition(panelX, panelY).setDisplaySize(panelW, panelH);
 
-    overlay.title.setPosition(panelX + panelW / 2, panelY + 10);
+    overlay.title.setPosition(panelX + panelW / 2, panelY + 14);
 
-    const closeSize = 36;
-    this.placeIconButton(overlay.closeBtn, panelX + panelW - closeSize / 2 - 8, panelY + 8 + closeSize / 2, closeSize);
+    const closeSize = 40;
+    this.placeIconButton(
+      overlay.closeBtn,
+      panelX + panelW - closeSize / 2 - 10,
+      panelY + 10 + closeSize / 2,
+      closeSize,
+    );
 
-    const tabsTop = panelY + 50;
+    const tabsTop = panelY + 60;
     const tabsCount = this.menuTabs.length;
-    const tabGap = 6;
-    const tabW = Math.floor((panelW - 16 - (tabsCount - 1) * tabGap) / tabsCount);
-    const tabH = 32;
-    let tx = panelX + 8 + tabW / 2;
+    const tabGap = 10;
+    const tabSize = Math.min(64, Math.floor((panelW - 24 - (tabsCount - 1) * tabGap) / tabsCount));
+    let tx = panelX + 12 + tabSize / 2;
     for (const tab of this.menuTabs) {
-      tab.container.setPosition(tx, tabsTop + tabH / 2);
-      tab.bg.setDisplaySize(tabW, tabH);
+      tab.container.setPosition(tx, tabsTop + tabSize / 2);
+      tab.bg.setDisplaySize(tabSize, tabSize);
       tab.bg.setTexture(tab.id === this.menuTab ? "tab-bg-active" : "tab-bg");
-      tx += tabW + tabGap;
+      tab.label.setFontSize(Math.floor(tabSize * 0.55));
+      tx += tabSize + tabGap;
     }
 
-    const rowsTop = tabsTop + tabH + 12;
-    this.menuRowsContainer.setPosition(panelX + 8, rowsTop);
+    const rowsTop = tabsTop + tabSize + 16;
+    this.menuRowsContainer.setPosition(panelX + 12, rowsTop);
   }
 
   private refreshMenu() {
@@ -836,110 +984,159 @@ export class GameScene extends Phaser.Scene {
     this.menuRowsContainer.removeAll(true);
 
     const w = this.scale.width;
-    const panelW = w - 32 - 16;
-    const rows: Array<{ name: string; desc: string; cost: string; canBuy: boolean; color: string; onBuy: () => void }> = [];
+    const panelMargin = 14;
+    const panelW = w - panelMargin * 2 - 24;
 
+    const rows: Array<MenuRow> = [];
     if (this.menuTab === "upgrades") rows.push(...this.upgradeRows());
     else if (this.menuTab === "greenhouse") rows.push(...this.greenhouseRows());
     else if (this.menuTab === "boosts") rows.push(...this.boostRows());
     else if (this.menuTab === "shop") rows.push(...this.shopRows());
 
     let y = 0;
-    const rowH = 56;
+    const rowH = 64;
+    const rowGap = 6;
     for (const r of rows) {
       const c = this.add.container(0, y);
-      const bg = this.add.image(0, 0, "tab-bg").setOrigin(0, 0);
-      bg.setDisplaySize(panelW, rowH - 6);
-      const name = this.add
-        .text(10, 6, r.name, {
-          fontFamily: PIXEL_FONT,
-          fontSize: "13px",
+      const bgKey = (rows.indexOf(r) % 2 === 0) ? "tab-bg" : "tab-bg-locked";
+      const bg = this.add.image(0, 0, bgKey).setOrigin(0, 0);
+      bg.setDisplaySize(panelW, rowH);
+
+      const iconSize = 44;
+      const iconBg = this.add.image(8, 10, "tab-bg-active").setOrigin(0, 0);
+      iconBg.setDisplaySize(iconSize, iconSize);
+      const iconText = this.add
+        .text(8 + iconSize / 2, 10 + iconSize / 2, r.icon, {
+          fontFamily: UI_FONT,
+          fontSize: "26px",
+        })
+        .setOrigin(0.5);
+
+      const statText = this.add
+        .text(8 + iconSize + 14, rowH / 2, r.stat, {
+          fontFamily: UI_FONT,
+          fontSize: "15px",
           color: "#e8f5d8",
           fontStyle: "bold",
         })
+        .setOrigin(0, 0.5);
+
+      const buyW = 92;
+      const buyH = 44;
+      const buyBg = this.add
+        .image(panelW - buyW - 10, (rowH - buyH) / 2, r.canBuy ? "btn-bg-accent" : "btn-bg-disabled")
         .setOrigin(0, 0);
-      const desc = this.add
-        .text(10, 24, r.desc, {
-          fontFamily: PIXEL_FONT,
-          fontSize: "10px",
-          color: "#9ec79e",
-        })
-        .setOrigin(0, 0);
-      const buyW = 80;
-      const buyH = 36;
-      const buyBg = this.add.image(panelW - buyW - 6, 6, r.canBuy ? "btn-bg-accent" : "btn-bg-disabled").setOrigin(0, 0);
       buyBg.setDisplaySize(buyW, buyH);
       buyBg.setInteractive({ useHandCursor: true });
-      buyBg.on("pointerdown", (_p: Phaser.Input.Pointer, _x: number, _y: number, ev: Phaser.Types.Input.EventData) => {
-        ev.stopPropagation();
-        if (!r.canBuy) return;
-        r.onBuy();
-        this.refreshMenu();
-      });
       const costText = this.add
-        .text(panelW - buyW / 2 - 6, 6 + buyH / 2, r.cost, {
-          fontFamily: PIXEL_FONT,
-          fontSize: "12px",
-          color: r.color,
+        .text(panelW - buyW / 2 - 10, rowH / 2, r.cost, {
+          fontFamily: NUM_FONT,
+          fontSize: "14px",
+          color: r.canBuy ? "#ffffff" : "#7c8a7c",
           fontStyle: "bold",
         })
         .setOrigin(0.5);
-      c.add([bg, name, desc, buyBg, costText]);
+
+      const tooltipAnchorX = 8 + iconSize / 2 + (this.menuRowsContainer.x ?? 0);
+      const tooltipAnchorY = y + 10 + iconSize / 2 + (this.menuRowsContainer.y ?? 0);
+
+      const showRowTooltip = () => {
+        this.showTooltip(r.id, r.name, r.description, tooltipAnchorX, tooltipAnchorY);
+      };
+
+      iconBg.setInteractive({ useHandCursor: true });
+      iconBg.on(
+        "pointerdown",
+        (_p: Phaser.Input.Pointer, _x: number, _y: number, ev: Phaser.Types.Input.EventData) => {
+          ev.stopPropagation();
+          showRowTooltip();
+        },
+      );
+      bg.setInteractive({ useHandCursor: true });
+      bg.on(
+        "pointerdown",
+        (_p: Phaser.Input.Pointer, _x: number, _y: number, ev: Phaser.Types.Input.EventData) => {
+          ev.stopPropagation();
+          showRowTooltip();
+        },
+      );
+
+      buyBg.on(
+        "pointerdown",
+        (_p: Phaser.Input.Pointer, _x: number, _y: number, ev: Phaser.Types.Input.EventData) => {
+          ev.stopPropagation();
+          if (!r.canBuy) return;
+          r.onBuy();
+          this.refreshMenu();
+        },
+      );
+
+      c.add([bg, iconBg, iconText, statText, buyBg, costText]);
       this.menuRowsContainer.add(c);
-      y += rowH;
+      y += rowH + rowGap;
     }
   }
 
-  private upgradeRows() {
+  private upgradeRows(): MenuRow[] {
     const z = this.activeZoneDef();
     const zs = this.state.zones[z.id];
     return [
       {
-        name: `🚜 Cart  Lv${zs.cartLevel}`,
-        desc: `+15% speed, +7% radius. New cart at L12, L24, L40.`,
+        id: `cart-${z.id}`,
+        icon: "🚜",
+        name: "Cart",
+        description: `Each cart auto-harvests crops it drives over. +15% speed and +7% radius per level. Extra cart at L12, L24, L40.`,
+        stat: `Lv ${zs.cartLevel}`,
         cost: formatNumber(cartCost(zs.cartLevel)),
         canBuy: this.state.coins >= cartCost(zs.cartLevel),
-        color: "#ffe89a",
         onBuy: () => {
           if (buyCart(this.state, z.id)) this.rebuildCartViews();
         },
       },
       {
-        name: `📦 Yield  Lv${zs.yieldLevel}/50`,
-        desc: `+1 crop per harvested spot.`,
+        id: `yield-${z.id}`,
+        icon: "📦",
+        name: "Yield",
+        description: `+1 crop produced per harvested spot. Caps at L50.`,
+        stat: `Lv ${zs.yieldLevel}/50`,
         cost: zs.yieldLevel >= 50 ? "MAX" : formatNumber(yieldCost(zs.yieldLevel)),
         canBuy: zs.yieldLevel < 50 && this.state.coins >= yieldCost(zs.yieldLevel),
-        color: "#ffe89a",
         onBuy: () => {
           buyYield(this.state, z.id);
         },
       },
       {
-        name: `⏱ Speed  Lv${zs.growthLevel}/30`,
-        desc: `−3% grow time per level.`,
+        id: `growth-${z.id}`,
+        icon: "⏱",
+        name: "Growth",
+        description: `−3% grow time per level. Floor at 10% of base. Caps at L30.`,
+        stat: `Lv ${zs.growthLevel}/30`,
         cost: zs.growthLevel >= 30 ? "MAX" : formatNumber(growthCost(zs.growthLevel)),
         canBuy: zs.growthLevel < 30 && this.state.coins >= growthCost(zs.growthLevel),
-        color: "#ffe89a",
         onBuy: () => {
           buyGrowth(this.state, z.id);
         },
       },
       {
-        name: `💲 Price  Lv${zs.priceLevel}/50`,
-        desc: `+5% sell price per level.`,
+        id: `price-${z.id}`,
+        icon: "💲",
+        name: "Sell Price",
+        description: `+5% sell price per level. Caps at L50.`,
+        stat: `Lv ${zs.priceLevel}/50`,
         cost: zs.priceLevel >= 50 ? "MAX" : formatNumber(priceCost(zs.priceLevel)),
         canBuy: zs.priceLevel < 50 && this.state.coins >= priceCost(zs.priceLevel),
-        color: "#ffe89a",
         onBuy: () => {
           buyPrice(this.state, z.id);
         },
       },
       {
-        name: `✋ Reach  Lv${this.state.dragRadiusLevel}/20`,
-        desc: `Bigger drag radius for harvesting.`,
+        id: `drag-${z.id}`,
+        icon: "✋",
+        name: "Reach",
+        description: `Bigger drag radius for harvesting. Global upgrade. Caps at L20.`,
+        stat: `Lv ${this.state.dragRadiusLevel}/20`,
         cost: this.state.dragRadiusLevel >= 20 ? "MAX" : formatNumber(dragRadiusCost(this.state.dragRadiusLevel)),
         canBuy: this.state.dragRadiusLevel < 20 && this.state.coins >= dragRadiusCost(this.state.dragRadiusLevel),
-        color: "#ffe89a",
         onBuy: () => {
           buyDragRadius(this.state);
         },
@@ -947,7 +1144,14 @@ export class GameScene extends Phaser.Scene {
     ];
   }
 
-  private greenhouseRows() {
+  private greenhouseRows(): MenuRow[] {
+    const icons: Record<string, string> = {
+      glass: "🏠",
+      sprinkler: "💧",
+      compost: "🌱",
+      replanter: "🔄",
+      scarecrow: "👻",
+    };
     return GREENHOUSE_ENTRIES.map((entry) => {
       const lvl = this.state.greenhouse[entry.id];
       const cost = entry.cost(lvl);
@@ -961,11 +1165,13 @@ export class GameScene extends Phaser.Scene {
           ? `${formatNumber(cost)}💎`
           : formatNumber(cost);
       return {
-        name: `${entry.name}  Lv${lvl}/${entry.max}`,
-        desc: entry.description,
+        id: `gh-${entry.id}`,
+        icon: icons[entry.id] ?? "🏠",
+        name: entry.name,
+        description: entry.description,
+        stat: `Lv ${lvl}/${entry.max}`,
         cost: costStr,
         canBuy,
-        color: entry.currency === "gems" ? "#a0f0f0" : "#ffe89a",
         onBuy: () => {
           buyGreenhouse(this.state, entry.id);
         },
@@ -973,24 +1179,26 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  private boostRows() {
+  private boostRows(): MenuRow[] {
     const inv = this.state.boostInventory;
-    const types: Array<{ kind: BoostKind; emoji: string; name: string; desc: string }> = [
-      { kind: "fertilizer", emoji: "🧪", name: "Super Fertilizer", desc: "+100% yield, 5 min" },
-      { kind: "sunshine", emoji: "☀", name: "Sunshine", desc: "+100% growth speed, 5 min" },
-      { kind: "market", emoji: "🏷", name: "Market Day", desc: "+100% sell price, 5 min" },
-      { kind: "lucky", emoji: "🍀", name: "Lucky Day", desc: "+500% gem drop rate, 1 hour" },
+    const types: Array<{ kind: BoostKind; icon: string; name: string; desc: string }> = [
+      { kind: "fertilizer", icon: "🧪", name: "Super Fertilizer", desc: "+100% yield for 5 minutes." },
+      { kind: "sunshine", icon: "☀", name: "Sunshine", desc: "+100% growth speed for 5 minutes." },
+      { kind: "market", icon: "🏷", name: "Market Day", desc: "+100% sell price for 5 minutes." },
+      { kind: "lucky", icon: "🍀", name: "Lucky Day", desc: "+500% gem drop rate for 1 hour." },
     ];
-    const rows = [];
+    const rows: MenuRow[] = [];
     for (const t of types) {
       const owned = inv[t.kind];
       const cost = BOOST_GEM_COST[t.kind];
       rows.push({
-        name: `${t.emoji} ${t.name}  x${owned}`,
-        desc: t.desc,
+        id: `boost-${t.kind}`,
+        icon: t.icon,
+        name: t.name,
+        description: t.desc,
+        stat: `x${owned} owned`,
         cost: owned > 0 ? "USE" : `${cost}💎`,
         canBuy: owned > 0 || this.state.gems >= cost,
-        color: "#a0f0f0",
         onBuy: () => {
           if (owned > 0) {
             activateBoost(this.state, t.kind, Date.now());
@@ -1003,28 +1211,47 @@ export class GameScene extends Phaser.Scene {
     return rows;
   }
 
-  private shopRows() {
+  private shopRows(): MenuRow[] {
+    const icons: Record<string, string> = {
+      coins1k: "💰",
+      coins10k: "💰",
+      coins100k: "💰",
+      magnetDrag: "🧲",
+      comboMultiplier: "🔥",
+      luckyCart: "🎰",
+      gameSpeed: "⏩",
+      autoSell: "🤖",
+      phantomHarvester: "👻",
+      weatherInsurance: "🛡",
+      heirloomSeeds: "🌟",
+      luckyCharm: "🍀",
+      offlineCap: "💤",
+    };
     return GEM_SHOP_ITEMS.map((item) => {
       const owned = item.isOwned(this.state);
       const cost = gemShopItemCost(this.state, item.id);
       const canBuy = !owned && this.state.gems >= cost;
-      let stateLabel = "";
+      let stat = "";
       if (item.id === "gameSpeed") {
         const lvl = this.state.gemUpgrades.gameSpeed;
-        stateLabel = ` (${lvl === 0 ? "1x" : lvl === 1 ? "1.5x" : "2x"})`;
+        stat = lvl === 0 ? "1x" : lvl === 1 ? "1.5x" : "2x";
       } else if (item.id === "luckyCharm") {
-        stateLabel = ` (${this.state.gemUpgrades.luckyCharm}/3)`;
+        stat = `${this.state.gemUpgrades.luckyCharm}/3`;
       } else if (item.id === "offlineCap") {
-        stateLabel = ` (${this.state.gemUpgrades.offlineCapStacks}/3)`;
-      } else if (item.isOwned(this.state)) {
-        stateLabel = " (OWNED)";
+        stat = `${this.state.gemUpgrades.offlineCapStacks}/3`;
+      } else if (owned) {
+        stat = "OWNED";
+      } else {
+        stat = "";
       }
       return {
-        name: `${item.name}${stateLabel}`,
-        desc: item.description,
+        id: `shop-${item.id}`,
+        icon: icons[item.id] ?? "💎",
+        name: item.name,
+        description: item.description,
+        stat,
         cost: owned ? "OWNED" : `${formatNumber(cost)}💎`,
         canBuy,
-        color: "#a0f0f0",
         onBuy: () => {
           buyGemShopItem(this.state, item.id);
         },
@@ -1035,7 +1262,7 @@ export class GameScene extends Phaser.Scene {
   private spawnFloat(x: number, y: number, text: string, color: string) {
     const t = this.add
       .text(x, y, text, {
-        fontFamily: PIXEL_FONT,
+        fontFamily: UI_FONT,
         fontSize: "16px",
         color,
         fontStyle: "bold",
