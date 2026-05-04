@@ -238,7 +238,8 @@ export class GameScene extends Phaser.Scene {
 
   update(_time: number, delta: number) {
     const now = Date.now();
-    tickCarts(this.state, now, delta);
+    const aspect = this.fieldRect.h > 0 ? this.fieldRect.w / this.fieldRect.h : 0.6;
+    tickCarts(this.state, now, delta, aspect);
     this.refresh();
 
     if (this.time.now - this.lastSaveAt > SAVE_INTERVAL_MS) {

@@ -492,7 +492,7 @@ export function buyCart(state: GameState, zoneId: string): boolean {
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
       facing: angle,
-      changeDirT: 0,
+      changeDirT: 1000,
     });
   }
   return true;
@@ -874,7 +874,12 @@ export function tickWeather(state: GameState, now: number): boolean {
 
 // ----- Cart tick -----
 
-export function tickCarts(state: GameState, now: number, deltaMs: number): void {
+export function tickCarts(
+  state: GameState,
+  now: number,
+  deltaMs: number,
+  fieldAspect: number = 0.6,
+): void {
   if (deltaMs <= 0) return;
   const speed = gameSpeedMultiplier(state);
   pruneBoosts(state, now);
@@ -882,6 +887,7 @@ export function tickCarts(state: GameState, now: number, deltaMs: number): void 
 
   const dt = (deltaMs / 1000) * speed;
   const inactiveBase = state.gemUpgrades.phantomHarvester ? 1 : 0.5;
+  const aspectClamp = Math.max(0.1, fieldAspect);
 
   for (const zoneDef of ZONES) {
     const zone = state.zones[zoneDef.id];
@@ -919,16 +925,22 @@ export function tickCarts(state: GameState, now: number, deltaMs: number): void 
       if (cart.changeDirT > 250) {
         cart.changeDirT = 0;
         const nearest = findNearestRipe(zone, cart.x, cart.y, grow, now);
-        let angle: number;
+        let pixelAngle: number;
         if (nearest) {
-          angle = Math.atan2(nearest.y - cart.y, nearest.x - cart.x);
+          // Project deltas into pixel-equivalent space so the target angle
+          // matches what the player sees on screen.
+          const dxPx = nearest.x - cart.x;
+          const dyPx = (nearest.y - cart.y) / aspectClamp;
+          pixelAngle = Math.atan2(dyPx, dxPx);
         } else {
-          angle = Math.atan2(cart.vy, cart.vx) + (Math.random() - 0.5) * 0.6;
+          const currentPixelAngle = Math.atan2(cart.vy / aspectClamp, cart.vx);
+          pixelAngle = currentPixelAngle + (Math.random() - 0.5) * 0.6;
         }
-        cart.vx = Math.cos(angle) * cartSpd;
-        cart.vy = Math.sin(angle) * cartSpd;
+        // Scale vy by aspect so sqrt((vx*W)^2 + (vy*H)^2) stays constant.
+        cart.vx = Math.cos(pixelAngle) * cartSpd;
+        cart.vy = Math.sin(pixelAngle) * cartSpd * aspectClamp;
       }
-      cart.facing = Math.atan2(cart.vy, cart.vx);
+      cart.facing = Math.atan2(cart.vy / aspectClamp, cart.vx);
 
       for (const spot of zone.spots) {
         if (!plotIsRipe(spot, grow, now)) continue;
