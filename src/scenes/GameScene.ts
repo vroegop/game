@@ -37,7 +37,8 @@ interface ZoneTab {
   container: Phaser.GameObjects.Container;
   bg: Phaser.GameObjects.Image;
   icon: Phaser.GameObjects.Text;
-  lock: Phaser.GameObjects.Text;
+  price: Phaser.GameObjects.Text;
+  enabled: boolean;
 }
 
 interface SpotView {
@@ -247,7 +248,6 @@ export class GameScene extends Phaser.Scene {
       tab.container.setPosition(x, y);
       tab.bg.setDisplaySize(tabSize, tabSize);
       tab.icon.setFontSize(24);
-      tab.lock.setFontSize(18);
       x += tabSize + gap;
     }
   }
@@ -258,10 +258,18 @@ export class GameScene extends Phaser.Scene {
     bg.setInteractive({ useHandCursor: true });
     bg.on("pointerdown", () => this.onTabTap(def.id));
     const icon = this.add.text(0, 0, def.emoji, { fontSize: "24px" }).setOrigin(0.5);
-    const lock = this.add.text(12, -12, "🔒", { fontSize: "16px" }).setOrigin(0.5).setVisible(false);
-    c.add([bg, icon, lock]);
+    const price = this.add
+      .text(0, 14, "", {
+        fontFamily: PIXEL_FONT,
+        fontSize: "10px",
+        color: "#ffe89a",
+        fontStyle: "bold",
+      })
+      .setOrigin(0.5)
+      .setVisible(false);
+    c.add([bg, icon, price]);
     this.tabsContainer.add(c);
-    return { def, container: c, bg, icon, lock };
+    return { def, container: c, bg, icon, price, enabled: true };
   }
 
   private makeIconButton(label: string, bgKey: string, onClick: () => void): IconButton {
@@ -405,12 +413,23 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onTabTap(zoneId: string) {
+    const tab = this.tabs.find((t) => t.def.id === zoneId);
+    if (!tab) return;
     const zone = this.state.zones[zoneId];
     if (!zone) return;
     if (!zone.unlocked) {
-      this.state.activeZoneId = zoneId;
-      this.rebuildSpotViews();
-      this.rebuildCartViews();
+      if (this.state.coins < tab.def.unlockCost) {
+        this.shake(tab.container);
+        return;
+      }
+      if (unlockZone(this.state, zoneId, Date.now())) {
+        setActiveZone(this.state, zoneId);
+        const sx = this.tabsContainer.x + tab.container.x;
+        const sy = this.tabsContainer.y + tab.container.y + 24;
+        this.spawnFloat(sx, sy, "Unlocked!", COLOR_GAIN);
+        this.rebuildSpotViews();
+        this.rebuildCartViews();
+      }
       return;
     }
     if (setActiveZone(this.state, zoneId)) {
@@ -522,13 +541,27 @@ export class GameScene extends Phaser.Scene {
     for (const tab of this.tabs) {
       const z = this.state.zones[tab.def.id];
       const isActive = tab.def.id === this.state.activeZoneId;
+      const canAfford = this.state.coins >= tab.def.unlockCost;
       let key: string;
-      if (isActive) key = "tab-bg-active";
+      if (z.unlocked && isActive) key = "tab-bg-active";
+      else if (!z.unlocked && canAfford) key = "tab-bg-warn";
       else if (!z.unlocked) key = "tab-bg-locked";
       else key = "tab-bg";
       tab.bg.setTexture(key);
-      tab.icon.setAlpha(z.unlocked ? 1 : 0.5);
-      tab.lock.setVisible(!z.unlocked);
+      tab.icon.setAlpha(z.unlocked ? 1 : canAfford ? 0.95 : 0.45);
+      if (z.unlocked) {
+        tab.price.setVisible(false);
+        tab.icon.setY(0);
+        tab.enabled = true;
+        tab.container.setAlpha(1);
+      } else {
+        tab.price.setVisible(true);
+        tab.price.setText(formatNumber(tab.def.unlockCost));
+        tab.price.setColor(canAfford ? "#fff080" : "#9a9a9a");
+        tab.icon.setY(-7);
+        tab.enabled = canAfford;
+        tab.container.setAlpha(canAfford ? 1 : 0.6);
+      }
     }
 
     this.titleText.setText(`${zoneDef.name.toUpperCase()}  -  BASKET ${zone.inventory}`);
