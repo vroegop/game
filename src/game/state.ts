@@ -344,10 +344,10 @@ export function effectiveYield(yieldLevel: number, state: GameState, now: number
 }
 
 export function cardYieldMult(zone: ZoneState): number {
-  let m = 1;
-  if (zone.cardUnlocked) m += 0.1;
-  if (zone.cardGilded) m += 0.25;
-  return m;
+  // Found: +10% yield. Shiny: doubles that to +20%.
+  if (zone.cardGilded) return 1.2;
+  if (zone.cardUnlocked) return 1.1;
+  return 1;
 }
 
 // Base chance per harvested spot to find that zone's card. Tuned so an

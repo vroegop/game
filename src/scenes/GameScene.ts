@@ -141,6 +141,9 @@ export class GameScene extends Phaser.Scene {
   private menuOverlay!: Phaser.GameObjects.Container;
   private menuTabs: { id: MenuTab; container: Phaser.GameObjects.Container; bg: Phaser.GameObjects.Image; label: Phaser.GameObjects.Text }[] = [];
   private menuRowsContainer!: Phaser.GameObjects.Container;
+  private menuMaskShape!: Phaser.GameObjects.Rectangle;
+  private menuHeaderSep!: Phaser.GameObjects.Rectangle;
+  private menuTabsSep!: Phaser.GameObjects.Rectangle;
 
   private tooltipContainer!: Phaser.GameObjects.Container;
   private tooltipBg!: Phaser.GameObjects.Rectangle;
@@ -845,8 +848,21 @@ export class GameScene extends Phaser.Scene {
       this.menuTabs.push({ id, container: c, bg, label });
     }
 
+    // Subtle separator lines that delimit header / tabs / content.
+    this.menuHeaderSep = this.add.rectangle(0, 0, 10, 1, 0x3a5a3a, 0.7).setOrigin(0, 0);
+    this.menuOverlay.add(this.menuHeaderSep);
+    this.menuTabsSep = this.add.rectangle(0, 0, 10, 1, 0x3a5a3a, 0.7).setOrigin(0, 0);
+    this.menuOverlay.add(this.menuTabsSep);
+
     this.menuRowsContainer = this.add.container(0, 0);
     this.menuOverlay.add(this.menuRowsContainer);
+
+    // Geometry mask clips list / grid content to the panel content area.
+    // The shape is sized in layoutMenu and never visible itself.
+    this.menuMaskShape = this.add.rectangle(0, 0, 10, 10, 0xffffff).setOrigin(0, 0);
+    this.menuMaskShape.setVisible(false);
+    const mask = this.menuMaskShape.createGeometryMask();
+    this.menuRowsContainer.setMask(mask);
   }
 
   private buildTooltip() {
@@ -993,35 +1009,58 @@ export class GameScene extends Phaser.Scene {
       shop: "Spend gems on game-changing perks",
     };
     overlay.title.setText(tabNames[this.menuTab]);
-    overlay.title.setPosition(panelX + panelW / 2, panelY + 16);
     overlay.subtitle.setText(tabSubs[this.menuTab]);
-    overlay.subtitle.setPosition(panelX + panelW / 2, panelY + 40);
 
+    // Header geometry: title and subtitle vertically centered as a group.
+    const headerH = 64;
+    const headerCenterY = panelY + headerH / 2;
+    const titleH = 22;
+    const subtitleH = 14;
+    const groupH = titleH + 2 + subtitleH;
+    const titleY = headerCenterY - groupH / 2;
+    const subtitleY = titleY + titleH + 2;
+    overlay.title.setPosition(panelX + panelW / 2, titleY);
+    overlay.subtitle.setPosition(panelX + panelW / 2, subtitleY);
+
+    // Close button vertically centered in the header strip.
     const closeSize = 38;
     this.placeIconButton(
       overlay.closeBtn,
-      panelX + panelW - closeSize / 2 - 12,
-      panelY + 12 + closeSize / 2,
+      panelX + panelW - closeSize / 2 - 14,
+      headerCenterY,
       closeSize,
     );
 
-    const tabsTop = panelY + 70;
+    // Separator below the header.
+    this.menuHeaderSep.setPosition(panelX + 14, panelY + headerH);
+    this.menuHeaderSep.setSize(panelW - 28, 1);
+
+    // Tab strip below header.
+    const tabsTop = panelY + headerH + 10;
     const tabsCount = this.menuTabs.length;
     const tabGap = 8;
-    const tabSize = Math.min(56, Math.floor((panelW - 24 - (tabsCount - 1) * tabGap) / tabsCount));
+    const tabSize = Math.min(54, Math.floor((panelW - 24 - (tabsCount - 1) * tabGap) / tabsCount));
     let tx = panelX + 12 + tabSize / 2;
     for (const tab of this.menuTabs) {
       tab.container.setPosition(tx, tabsTop + tabSize / 2);
       tab.bg.setDisplaySize(tabSize, tabSize);
       tab.bg.setTexture(tab.id === this.menuTab ? "tab-bg-active" : "tab-bg");
-      // Inactive tabs are dimmer to focus attention on the active one.
       tab.container.setAlpha(tab.id === this.menuTab ? 1 : 0.55);
       tab.label.setFontSize(Math.floor(tabSize * 0.55));
       tx += tabSize + tabGap;
     }
 
-    const rowsTop = tabsTop + tabSize + 14;
-    this.menuRowsContainer.setPosition(panelX + 12, rowsTop);
+    // Separator below tabs.
+    const tabsBottom = tabsTop + tabSize + 8;
+    this.menuTabsSep.setPosition(panelX + 14, tabsBottom);
+    this.menuTabsSep.setSize(panelW - 28, 1);
+
+    // Content area + clip mask.
+    const contentTop = tabsBottom + 8;
+    const contentH = panelY + panelH - contentTop - 12;
+    this.menuRowsContainer.setPosition(panelX + 12, contentTop);
+    this.menuMaskShape.setPosition(panelX + 12, contentTop);
+    this.menuMaskShape.setSize(panelW - 24, contentH);
   }
 
   private refreshMenu() {
