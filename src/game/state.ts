@@ -350,8 +350,13 @@ export function cardYieldMult(zone: ZoneState): number {
   return m;
 }
 
-export function cardThreshold(zoneIndex: number): number {
-  return 100 * (zoneIndex + 1);
+// Base chance per harvested spot to find that zone's card. Tuned so an
+// engaged active player finds one in roughly 1.5–3 hours, and an idle
+// player on the same zone finds one in 6–8 hours. Lucky Charms multiply.
+const CARD_BASE_DROP = 0.001;
+
+export function cardDropChance(state: GameState): number {
+  return CARD_BASE_DROP * (1 + state.gemUpgrades.luckyCharm);
 }
 
 export function cardGildCost(zoneIndex: number): number {
@@ -371,12 +376,19 @@ export function gildCard(state: GameState, zoneId: string): boolean {
 }
 
 function recordHarvest(state: GameState, zoneId: string, count: number): void {
-  const idx = ZONES.findIndex((z) => z.id === zoneId);
-  if (idx < 0) return;
   const zone = state.zones[zoneId];
+  if (!zone) return;
   zone.totalHarvested += count;
-  if (!zone.cardUnlocked && zone.totalHarvested >= cardThreshold(idx)) {
-    zone.cardUnlocked = true;
+  if (!zone.cardUnlocked) {
+    const dropChance = cardDropChance(state);
+    // Independent roll per harvested crop (count of crops, not spots).
+    // P(at least one drop in N trials) ≈ 1 - (1-p)^N.
+    for (let i = 0; i < count; i++) {
+      if (Math.random() < dropChance) {
+        zone.cardUnlocked = true;
+        break;
+      }
+    }
   }
 }
 

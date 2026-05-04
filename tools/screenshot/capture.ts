@@ -44,6 +44,8 @@ async function waitForServer(url: string): Promise<void> {
 async function main() {
   mkdirSync(SCREENSHOTS_DIR, { recursive: true });
   const tag = (process.argv[2] ?? "ui").replace(/[^a-z0-9-_]/gi, "-");
+  const menuTab = process.argv[3]; // "upgrades" | "cards" | "greenhouse" | "boosts" | "shop"
+  const onlyIphone = process.argv.includes("--phone-only") || menuTab !== undefined;
   const ts = timestamp();
 
   console.log("Starting dev server...");
@@ -59,8 +61,10 @@ async function main() {
     console.log("Dev server ready. Launching Chromium...");
     browser = await chromium.launch();
 
+    const viewports = onlyIphone ? VIEWPORTS.filter((v) => v.name === "iphone-13") : VIEWPORTS;
+    const queryString = menuTab ? `?menu=1&tab=${menuTab}` : "";
     const summary: { viewport: string; file: string; size: { w: number; h: number } }[] = [];
-    for (const vp of VIEWPORTS) {
+    for (const vp of viewports) {
       const ctx = await browser.newContext({
         viewport: { width: vp.width, height: vp.height },
         deviceScaleFactor: 2,
@@ -68,9 +72,9 @@ async function main() {
         hasTouch: true,
       });
       const page: Page = await ctx.newPage();
-      await page.goto(`http://127.0.0.1:${DEV_PORT}/`);
+      await page.goto(`http://127.0.0.1:${DEV_PORT}/${queryString}`);
       await page.waitForSelector("canvas", { state: "visible" });
-      await page.waitForTimeout(SETTLE_MS);
+      await page.waitForTimeout(menuTab ? 2000 : SETTLE_MS);
       const file = join(SCREENSHOTS_DIR, `${ts}-${tag}-${vp.name}.png`);
       await page.screenshot({ path: file, fullPage: false });
       summary.push({ viewport: vp.name, file, size: { w: vp.width, h: vp.height } });

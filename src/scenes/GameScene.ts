@@ -21,7 +21,6 @@ import {
   effectiveYield,
   BOOST_GEM_COST,
   cardGildCost,
-  cardThreshold,
   GameState,
   GEM_SHOP_ITEMS,
   gildCard,
@@ -258,6 +257,18 @@ export class GameScene extends Phaser.Scene {
 
     this.events.on(Phaser.Scenes.Events.SHUTDOWN, () => saveState(this.state));
     window.addEventListener("beforeunload", () => saveState(this.state));
+
+    // Debug: auto-open menu via URL params (?menu=1&tab=cards)
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("menu") === "1") {
+        const tab = params.get("tab") as MenuTab | null;
+        if (tab && ["upgrades", "cards", "greenhouse", "boosts", "shop"].includes(tab)) {
+          this.menuTab = tab;
+        }
+        this.toggleMenu();
+      }
+    }
   }
 
   update(_time: number, delta: number) {
@@ -770,17 +781,27 @@ export class GameScene extends Phaser.Scene {
     (this.menuOverlay as Phaser.GameObjects.Container & { dim?: Phaser.GameObjects.Rectangle }).dim = dim;
 
     const title = this.add
-      .text(0, 0, "MENU", {
+      .text(0, 0, "Farm Upgrades", {
         fontFamily: UI_FONT,
-        fontSize: "20px",
-        color: "#e8f5d8",
+        fontSize: "18px",
+        color: "#f0f5e8",
         fontStyle: "bold",
       })
       .setOrigin(0.5, 0);
     this.menuOverlay.add(title);
     (this.menuOverlay as any).title = title;
 
-    const closeBtn = this.makeIconButton("X", "btn-bg-warn", () => this.toggleMenu());
+    const subtitle = this.add
+      .text(0, 0, "", {
+        fontFamily: UI_FONT,
+        fontSize: "11px",
+        color: "#9ec79e",
+      })
+      .setOrigin(0.5, 0);
+    this.menuOverlay.add(subtitle);
+    (this.menuOverlay as any).subtitle = subtitle;
+
+    const closeBtn = this.makeIconButton("✕", "btn-bg", () => this.toggleMenu());
     this.menuOverlay.add(closeBtn.container);
     (this.menuOverlay as any).closeBtn = closeBtn;
 
@@ -957,30 +978,49 @@ export class GameScene extends Phaser.Scene {
     const panelY = panelMargin;
     overlay.panel.setPosition(panelX, panelY).setDisplaySize(panelW, panelH);
 
-    overlay.title.setPosition(panelX + panelW / 2, panelY + 14);
+    const tabNames: Record<MenuTab, string> = {
+      upgrades: "Farm Upgrades",
+      cards: "Crop Cards",
+      greenhouse: "Greenhouse",
+      boosts: "Boosts",
+      shop: "Gem Shop",
+    };
+    const tabSubs: Record<MenuTab, string> = {
+      upgrades: "Improve carts, yield, growth speed and reach",
+      cards: "Find rare cards while harvesting",
+      greenhouse: "Permanent global upgrades",
+      boosts: "Time-limited buffs, fueled by gems",
+      shop: "Spend gems on game-changing perks",
+    };
+    overlay.title.setText(tabNames[this.menuTab]);
+    overlay.title.setPosition(panelX + panelW / 2, panelY + 16);
+    overlay.subtitle.setText(tabSubs[this.menuTab]);
+    overlay.subtitle.setPosition(panelX + panelW / 2, panelY + 40);
 
-    const closeSize = 40;
+    const closeSize = 38;
     this.placeIconButton(
       overlay.closeBtn,
-      panelX + panelW - closeSize / 2 - 10,
-      panelY + 10 + closeSize / 2,
+      panelX + panelW - closeSize / 2 - 12,
+      panelY + 12 + closeSize / 2,
       closeSize,
     );
 
-    const tabsTop = panelY + 60;
+    const tabsTop = panelY + 70;
     const tabsCount = this.menuTabs.length;
-    const tabGap = 10;
-    const tabSize = Math.min(64, Math.floor((panelW - 24 - (tabsCount - 1) * tabGap) / tabsCount));
+    const tabGap = 8;
+    const tabSize = Math.min(56, Math.floor((panelW - 24 - (tabsCount - 1) * tabGap) / tabsCount));
     let tx = panelX + 12 + tabSize / 2;
     for (const tab of this.menuTabs) {
       tab.container.setPosition(tx, tabsTop + tabSize / 2);
       tab.bg.setDisplaySize(tabSize, tabSize);
       tab.bg.setTexture(tab.id === this.menuTab ? "tab-bg-active" : "tab-bg");
+      // Inactive tabs are dimmer to focus attention on the active one.
+      tab.container.setAlpha(tab.id === this.menuTab ? 1 : 0.55);
       tab.label.setFontSize(Math.floor(tabSize * 0.55));
       tx += tabSize + tabGap;
     }
 
-    const rowsTop = tabsTop + tabSize + 16;
+    const rowsTop = tabsTop + tabSize + 14;
     this.menuRowsContainer.setPosition(panelX + 12, rowsTop);
   }
 
@@ -1001,65 +1041,90 @@ export class GameScene extends Phaser.Scene {
 
     let y = 0;
     const rowH = 64;
-    const rowGap = 6;
+    const rowGap = 2;
     for (const r of rows) {
       const c = this.add.container(0, y);
-      const bgKey = (rows.indexOf(r) % 2 === 0) ? "tab-bg" : "tab-bg-locked";
-      const bg = this.add.image(0, 0, bgKey).setOrigin(0, 0);
-      bg.setDisplaySize(panelW, rowH);
 
-      const iconSize = 44;
-      const iconBg = this.add.image(8, 10, "tab-bg-active").setOrigin(0, 0);
-      iconBg.setDisplaySize(iconSize, iconSize);
+      // Hit-area: invisible rectangle covering the whole row except the buy button.
+      // Provides a click target for tooltips without adding visual noise.
+      const tapArea = this.add
+        .rectangle(0, 0, panelW - 110, rowH, 0xffffff, 0)
+        .setOrigin(0, 0);
+
+      // Subtle 1px separator below each row (except the last visually).
+      const separator = this.add
+        .rectangle(8, rowH - 1, panelW - 16, 1, 0x2a4a2a, 0.7)
+        .setOrigin(0, 0);
+
+      const iconSize = 48;
       const iconText = this.add
-        .text(8 + iconSize / 2, 10 + iconSize / 2, r.icon, {
+        .text(20, rowH / 2, r.icon, {
           fontFamily: UI_FONT,
-          fontSize: "26px",
+          fontSize: `${Math.floor(iconSize * 0.7)}px`,
         })
-        .setOrigin(0.5);
+        .setOrigin(0.5, 0.5);
 
-      const statText = this.add
-        .text(8 + iconSize + 14, rowH / 2, r.stat, {
+      const nameText = this.add
+        .text(56, rowH / 2 - 12, r.name, {
           fontFamily: UI_FONT,
-          fontSize: "15px",
-          color: "#e8f5d8",
+          fontSize: "14px",
+          color: "#f0f5e8",
           fontStyle: "bold",
         })
         .setOrigin(0, 0.5);
 
-      const buyW = 92;
-      const buyH = 44;
-      const buyBg = this.add
-        .image(panelW - buyW - 10, (rowH - buyH) / 2, r.canBuy ? "btn-bg-accent" : "btn-bg-disabled")
-        .setOrigin(0, 0);
-      buyBg.setDisplaySize(buyW, buyH);
-      buyBg.setInteractive({ useHandCursor: true });
+      const statText = this.add
+        .text(56, rowH / 2 + 10, r.stat, {
+          fontFamily: UI_FONT,
+          fontSize: "12px",
+          color: "#9ec79e",
+        })
+        .setOrigin(0, 0.5);
+
+      // Single buy button. Color stays accent green, opacity drops when disabled.
+      // Rows with no available action ("—") render only a status label, no
+      // button — keeps the right column quiet for locked/found-elsewhere items.
+      const buyW = 86;
+      const buyH = 40;
+      const buyX = panelW - buyW - 10;
+      const buyY = (rowH - buyH) / 2;
+      const noAction = r.cost === "—";
+      const isLabel = r.cost === "DONE" || r.cost === "OWNED" || noAction;
+
+      let buyBg: Phaser.GameObjects.Image | null = null;
+      if (!isLabel) {
+        buyBg = this.add.image(buyX, buyY, "btn-bg-accent").setOrigin(0, 0);
+        buyBg.setDisplaySize(buyW, buyH);
+        buyBg.setAlpha(r.canBuy ? 1 : 0.4);
+        buyBg.setInteractive({ useHandCursor: true });
+      }
+
+      const costColor = noAction
+        ? "#5a7a5a"
+        : isLabel
+          ? "#9ec79e"
+          : r.canBuy
+            ? "#ffffff"
+            : "#bcd0bc";
       const costText = this.add
-        .text(panelW - buyW / 2 - 10, rowH / 2, r.cost, {
-          fontFamily: NUM_FONT,
-          fontSize: "14px",
-          color: r.canBuy ? "#ffffff" : "#7c8a7c",
+        .text(buyX + buyW / 2, buyY + buyH / 2, r.cost, {
+          fontFamily: isLabel ? UI_FONT : NUM_FONT,
+          fontSize: isLabel ? "12px" : "14px",
+          color: costColor,
           fontStyle: "bold",
         })
         .setOrigin(0.5);
+      if (isLabel) costText.setAlpha(0.85);
 
-      const tooltipAnchorX = 8 + iconSize / 2 + (this.menuRowsContainer.x ?? 0);
-      const tooltipAnchorY = y + 10 + iconSize / 2 + (this.menuRowsContainer.y ?? 0);
+      const tooltipAnchorX = 20 + (this.menuRowsContainer.x ?? 0);
+      const tooltipAnchorY = y + rowH / 2 + (this.menuRowsContainer.y ?? 0);
 
       const showRowTooltip = () => {
         this.showTooltip(r.id, r.name, r.description, tooltipAnchorX, tooltipAnchorY);
       };
 
-      iconBg.setInteractive({ useHandCursor: true });
-      iconBg.on(
-        "pointerdown",
-        (_p: Phaser.Input.Pointer, _x: number, _y: number, ev: Phaser.Types.Input.EventData) => {
-          ev.stopPropagation();
-          showRowTooltip();
-        },
-      );
-      bg.setInteractive({ useHandCursor: true });
-      bg.on(
+      tapArea.setInteractive({ useHandCursor: true });
+      tapArea.on(
         "pointerdown",
         (_p: Phaser.Input.Pointer, _x: number, _y: number, ev: Phaser.Types.Input.EventData) => {
           ev.stopPropagation();
@@ -1067,17 +1132,26 @@ export class GameScene extends Phaser.Scene {
         },
       );
 
-      buyBg.on(
-        "pointerdown",
-        (_p: Phaser.Input.Pointer, _x: number, _y: number, ev: Phaser.Types.Input.EventData) => {
-          ev.stopPropagation();
-          if (!r.canBuy) return;
-          r.onBuy();
-          this.refreshMenu();
-        },
-      );
+      if (buyBg) {
+        buyBg.on(
+          "pointerdown",
+          (_p: Phaser.Input.Pointer, _x: number, _y: number, ev: Phaser.Types.Input.EventData) => {
+            ev.stopPropagation();
+            if (!r.canBuy) {
+              // Tap on disabled button: show tooltip explaining what it does.
+              showRowTooltip();
+              return;
+            }
+            r.onBuy();
+            this.refreshMenu();
+          },
+        );
+      }
 
-      c.add([bg, iconBg, iconText, statText, buyBg, costText]);
+      const items: Phaser.GameObjects.GameObject[] = [tapArea, iconText, nameText, statText];
+      if (buyBg) items.push(buyBg);
+      items.push(costText, separator);
+      c.add(items);
       this.menuRowsContainer.add(c);
       y += rowH + rowGap;
     }
@@ -1153,36 +1227,39 @@ export class GameScene extends Phaser.Scene {
   private cardRows(): MenuRow[] {
     return ZONES.map((def, idx) => {
       const zone = this.state.zones[def.id];
-      const threshold = cardThreshold(idx);
-      const progress = Math.min(zone.totalHarvested, threshold);
       let stat: string;
       let cost: string;
       let canBuy: boolean;
       let onBuy: () => void;
+      let desc: string;
       if (zone.cardGilded) {
-        stat = "GILDED  +35% yield";
+        stat = "Gilded · +35% yield";
         cost = "DONE";
         canBuy = false;
         onBuy = () => {};
+        desc = `${def.name} card is gilded. +35% yield in this zone forever.`;
       } else if (zone.cardUnlocked) {
         const gildPrice = cardGildCost(idx);
-        stat = "+10% yield";
-        cost = `${gildPrice}💎`;
+        stat = "Found · +10% yield";
+        cost = `💎 ${gildPrice}`;
         canBuy = this.state.gems >= gildPrice;
         onBuy = () => {
           gildCard(this.state, def.id);
         };
-      } else {
-        stat = `${formatNumber(progress)}/${formatNumber(threshold)}`;
-        cost = "LOCKED";
+        desc = `${def.name} card found. +10% yield in this zone. Gild it with gems for an extra +25%.`;
+      } else if (!zone.unlocked) {
+        stat = "Zone locked";
+        cost = "—";
         canBuy = false;
         onBuy = () => {};
+        desc = `Unlock ${def.name} first. Cards are rare drops while harvesting that crop.`;
+      } else {
+        stat = "Not found yet";
+        cost = "—";
+        canBuy = false;
+        onBuy = () => {};
+        desc = `Cards drop randomly while harvesting. Keep farming ${def.name} — every crop has a tiny chance to drop one.`;
       }
-      const desc = zone.cardGilded
-        ? `${def.name} card is gilded: +10% base + 25% gild = +35% yield in this zone, plus +5% gem drop chance.`
-        : zone.cardUnlocked
-          ? `${def.name} card unlocked. +10% yield in this zone. Gild for an extra +25% yield and +5% gem drops.`
-          : `Harvest ${formatNumber(threshold)} ${def.name} crops to unlock its card. Cards permanently boost yield.`;
       return {
         id: `card-${def.id}`,
         icon: def.emoji,
