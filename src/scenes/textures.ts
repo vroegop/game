@@ -53,6 +53,16 @@ export function generatePixelTextures(scene: Phaser.Scene): void {
 
   generateCoin(scene, "coin");
 
+  generateCropSprite(scene, "crop-empty", () => {});
+  generateCropSprite(scene, "crop-wheat-s1", drawSingleWheatStage1);
+  generateCropSprite(scene, "crop-wheat-s2", drawSingleWheatStage2);
+  generateCropSprite(scene, "crop-wheat-s3", drawSingleWheatStage3);
+  generateCropSprite(scene, "crop-carrot-s1", drawSingleCarrotStage1);
+  generateCropSprite(scene, "crop-carrot-s2", drawSingleCarrotStage2);
+  generateCropSprite(scene, "crop-carrot-s3", drawSingleCarrotStage3);
+
+  generateCart(scene, "cart");
+
   generatePixelButton(scene, "btn-bg", 0x3d6a3d, 0x5d8a5d, 0x1d3a1d);
   generatePixelButton(scene, "btn-bg-accent", 0x4a8a5a, 0x6aaa7a, 0x2a5a3a);
   generatePixelButton(scene, "btn-bg-warn", 0xc08020, 0xe0a040, 0x804a10);
@@ -64,7 +74,9 @@ export function generatePixelTextures(scene: Phaser.Scene): void {
   generatePixelPanel(scene, "panel-bg", 0x223422, 0x3a5a3a, 0x101a10);
   generateRipeBorder(scene, "ripe-border");
   generateGrass(scene, "grass-bg");
+  generateSoilBg(scene, "soil-bg");
   generateFieldFrame(scene, "field-frame");
+  generateDragRing(scene, "drag-ring");
 }
 
 function generatePlotTile(scene: Phaser.Scene, key: string, drawCrops: (g: Phaser.GameObjects.Graphics) => void): void {
@@ -389,4 +401,238 @@ export function pickStageTexture(zoneId: string, progress: number, ripe: boolean
   if (progress < 0.55) return `${prefix}-s1`;
   if (progress < 0.85) return `${prefix}-s2`;
   return `${prefix}-s3`;
+}
+
+export function pickCropSpriteKey(zoneId: string, progress: number, ripe: boolean): string {
+  const prefix = zoneId === "carrots" ? "carrot" : "wheat";
+  if (ripe) return `crop-${prefix}-s3`;
+  if (progress < 0.2) return "crop-empty";
+  if (progress < 0.55) return `crop-${prefix}-s1`;
+  if (progress < 0.85) return `crop-${prefix}-s2`;
+  return `crop-${prefix}-s3`;
+}
+
+const CROP_SPRITE_W = 16;
+const CROP_SPRITE_H = 16;
+
+function generateCropSprite(
+  scene: Phaser.Scene,
+  key: string,
+  drawCrop: (g: Phaser.GameObjects.Graphics) => void,
+): void {
+  const g = scene.add.graphics();
+  g.fillStyle(0x000000, 0);
+  g.fillRect(0, 0, CROP_SPRITE_W, CROP_SPRITE_H);
+  drawCrop(g);
+  g.generateTexture(key, CROP_SPRITE_W, CROP_SPRITE_H);
+  g.destroy();
+}
+
+function drawSingleWheatStage1(g: Phaser.GameObjects.Graphics): void {
+  const xs = [4, 8, 12];
+  for (const x of xs) {
+    g.fillStyle(0x4a8a30, 1);
+    g.fillRect(x, 13, 1, 2);
+    g.fillStyle(0x6abc4a, 1);
+    g.fillRect(x, 12, 1, 1);
+  }
+}
+
+function drawSingleWheatStage2(g: Phaser.GameObjects.Graphics): void {
+  const xs = [4, 8, 12];
+  const heights = [4, 5, 4];
+  for (let i = 0; i < xs.length; i++) {
+    const x = xs[i];
+    const h = heights[i];
+    const top = 15 - h;
+    g.fillStyle(PALETTES.wheatLeaf, 1);
+    g.fillRect(x, top, 1, h);
+    g.fillStyle(PALETTES.sproutLight, 1);
+    g.fillRect(x, top - 1, 1, 1);
+    g.fillRect(x - 1, top + 1, 1, 1);
+    g.fillRect(x + 1, top, 1, 1);
+  }
+}
+
+function drawSingleWheatStage3(g: Phaser.GameObjects.Graphics): void {
+  drawWheatStalk(g, 4, 8, false);
+  drawWheatStalk(g, 8, 6, true);
+  drawWheatStalk(g, 12, 8, false);
+}
+
+function drawWheatStalk(g: Phaser.GameObjects.Graphics, x: number, headTop: number, tall: boolean): void {
+  const baseY = 15;
+  const headBottom = headTop + 4;
+  g.fillStyle(PALETTES.wheatStem, 1);
+  g.fillRect(x, headBottom, 1, baseY - headBottom);
+  g.fillStyle(PALETTES.wheatLeaf, 1);
+  g.fillRect(x - 1, headBottom + 2, 1, 1);
+  g.fillStyle(PALETTES.wheatHead, 1);
+  g.fillRect(x - 1, headTop, 3, 4);
+  g.fillStyle(PALETTES.wheatHeadHi, 1);
+  g.fillRect(x, headTop, 1, 1);
+  g.fillRect(x - 1, headTop + 1, 1, 1);
+  g.fillStyle(PALETTES.wheatHeadLo, 1);
+  g.fillRect(x + 1, headTop + 3, 1, 1);
+  if (tall) {
+    g.fillStyle(PALETTES.wheatHeadHi, 1);
+    g.fillRect(x, headTop - 1, 1, 1);
+  }
+}
+
+function drawSingleCarrotStage1(g: Phaser.GameObjects.Graphics): void {
+  const xs = [4, 8, 12];
+  for (const x of xs) {
+    g.fillStyle(PALETTES.carrotLeaf, 1);
+    g.fillRect(x, 13, 1, 2);
+    g.fillStyle(PALETTES.carrotLeafHi, 1);
+    g.fillRect(x, 12, 1, 1);
+  }
+}
+
+function drawSingleCarrotStage2(g: Phaser.GameObjects.Graphics): void {
+  const xs = [4, 8, 12];
+  for (const x of xs) {
+    g.fillStyle(PALETTES.carrotLeafLo, 1);
+    g.fillRect(x, 11, 1, 4);
+    g.fillStyle(PALETTES.carrotLeaf, 1);
+    g.fillRect(x - 1, 11, 1, 1);
+    g.fillRect(x + 1, 11, 1, 1);
+    g.fillStyle(PALETTES.carrotLeafHi, 1);
+    g.fillRect(x, 10, 1, 1);
+  }
+}
+
+function drawSingleCarrotStage3(g: Phaser.GameObjects.Graphics): void {
+  drawCarrotPlant(g, 4);
+  drawCarrotPlant(g, 8);
+  drawCarrotPlant(g, 12);
+}
+
+function drawCarrotPlant(g: Phaser.GameObjects.Graphics, x: number): void {
+  g.fillStyle(PALETTES.carrotLeafLo, 1);
+  g.fillRect(x, 6, 1, 3);
+  g.fillStyle(PALETTES.carrotLeaf, 1);
+  g.fillRect(x - 1, 6, 1, 1);
+  g.fillRect(x + 1, 6, 1, 1);
+  g.fillStyle(PALETTES.carrotLeafHi, 1);
+  g.fillRect(x, 5, 1, 1);
+  g.fillStyle(PALETTES.carrotBody, 1);
+  g.fillRect(x - 1, 9, 3, 4);
+  g.fillRect(x, 13, 1, 1);
+  g.fillStyle(PALETTES.carrotBodyHi, 1);
+  g.fillRect(x - 1, 9, 1, 2);
+  g.fillStyle(PALETTES.carrotBodyLo, 1);
+  g.fillRect(x + 1, 11, 1, 2);
+}
+
+function generateCart(scene: Phaser.Scene, key: string): void {
+  const g = scene.add.graphics();
+  const W = 24;
+  const H = 16;
+  g.fillStyle(0x000000, 0);
+  g.fillRect(0, 0, W, H);
+  const wood = 0x8a5a30;
+  const woodDark = 0x5a3a18;
+  const woodHi = 0xb88858;
+  const metal = 0x686868;
+  const wheel = 0x303030;
+  const wheelHi = 0x808080;
+  g.fillStyle(woodDark, 1);
+  g.fillRect(3, 3, 18, 8);
+  g.fillStyle(wood, 1);
+  g.fillRect(4, 4, 16, 6);
+  g.fillStyle(woodHi, 1);
+  g.fillRect(4, 4, 16, 1);
+  g.fillRect(4, 4, 1, 5);
+  g.fillStyle(woodDark, 1);
+  g.fillRect(7, 6, 1, 3);
+  g.fillRect(11, 6, 1, 3);
+  g.fillRect(15, 6, 1, 3);
+  g.fillStyle(metal, 1);
+  g.fillRect(2, 11, 20, 1);
+  g.fillStyle(wheel, 1);
+  g.fillRect(4, 11, 4, 4);
+  g.fillRect(16, 11, 4, 4);
+  g.fillStyle(wheelHi, 1);
+  g.fillRect(5, 12, 2, 1);
+  g.fillRect(17, 12, 2, 1);
+  g.fillRect(5, 13, 1, 1);
+  g.fillRect(17, 13, 1, 1);
+  g.fillStyle(0x202020, 1);
+  g.fillRect(4, 14, 4, 1);
+  g.fillRect(16, 14, 4, 1);
+  g.fillStyle(woodDark, 1);
+  g.fillRect(0, 6, 3, 1);
+  g.fillRect(21, 6, 3, 1);
+  g.fillStyle(wood, 1);
+  g.fillRect(0, 7, 3, 1);
+  g.fillRect(21, 7, 3, 1);
+  g.generateTexture(key, W, H);
+  g.destroy();
+}
+
+function generateSoilBg(scene: Phaser.Scene, key: string): void {
+  const g = scene.add.graphics();
+  const W = 64;
+  const H = 64;
+  for (let y = 0; y < H; y++) {
+    g.fillStyle(y % 2 === 0 ? 0x8b6233 : 0x7a5128, 1);
+    g.fillRect(0, y, W, 1);
+  }
+  const furrows = [10, 22, 34, 46, 58];
+  for (const y of furrows) {
+    g.fillStyle(0xb88858, 1);
+    g.fillRect(0, y - 1, W, 1);
+    g.fillStyle(0x5a3a1a, 1);
+    g.fillRect(0, y, W, 1);
+    g.fillStyle(0x352010, 1);
+    g.fillRect(0, y + 1, W, 1);
+  }
+  const dotsDark: Array<[number, number]> = [
+    [4, 4], [13, 6], [22, 3], [31, 7], [42, 5], [51, 4], [58, 6],
+    [5, 16], [16, 17], [27, 15], [38, 16], [48, 14], [56, 17],
+    [3, 27], [14, 28], [25, 26], [36, 28], [47, 27], [55, 26],
+    [4, 39], [15, 40], [26, 38], [38, 41], [49, 39], [60, 40],
+    [3, 51], [14, 52], [27, 51], [40, 50], [51, 52], [60, 51],
+    [4, 62], [16, 62], [29, 61], [42, 62], [54, 62],
+  ];
+  g.fillStyle(0x432a10, 1);
+  for (const [x, y] of dotsDark) g.fillRect(x, y, 1, 1);
+  const dotsLight: Array<[number, number]> = [
+    [9, 5], [19, 4], [28, 5], [37, 4], [46, 6], [54, 5],
+    [9, 16], [21, 14], [31, 16], [44, 15], [53, 16],
+    [9, 27], [21, 28], [33, 26], [44, 28], [53, 27],
+    [10, 39], [22, 38], [33, 40], [45, 39], [54, 40],
+    [9, 50], [21, 52], [33, 51], [45, 50], [56, 52],
+    [10, 62], [23, 61], [37, 62], [49, 61],
+  ];
+  g.fillStyle(0xc89968, 1);
+  for (const [x, y] of dotsLight) g.fillRect(x, y, 1, 1);
+  g.generateTexture(key, W, H);
+  g.destroy();
+}
+
+function generateDragRing(scene: Phaser.Scene, key: string): void {
+  const g = scene.add.graphics();
+  const W = 64;
+  const H = 64;
+  const cx = W / 2;
+  const cy = H / 2;
+  const radius = 30;
+  const inner = 26;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const dx = x + 0.5 - cx;
+      const dy = y + 0.5 - cy;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d <= radius && d >= inner) {
+        const isOuterEdge = d > radius - 1.2 || d < inner + 1.2;
+        g.fillStyle(isOuterEdge ? 0xfff080 : 0xffd040, 1);
+        g.fillRect(x, y, 1, 1);
+      }
+    }
+  }
+  g.generateTexture(key, W, H);
+  g.destroy();
 }

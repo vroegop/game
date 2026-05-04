@@ -2,7 +2,6 @@ import {
   GameState,
   buyCart,
   cartCost,
-  cartIntervalMs,
   createInitialState,
   harvestAllRipe,
   plotIsRipe,
@@ -56,7 +55,7 @@ function fmtTime(ms: number): string {
 function run(strategy: Strategy, durationMs: number): RunResult {
   const state = createInitialState();
   for (const z of ZONES) {
-    for (const p of state.zones[z.id].plots) p.plantedAt = 0;
+    for (const p of state.zones[z.id].spots) p.plantedAt = 0;
   }
   state.lastSaved = 0;
   const events: SimEvent[] = [{ t: 0, kind: "start", detail: strategy.name }];
@@ -81,7 +80,7 @@ function run(strategy: Strategy, durationMs: number): RunResult {
     const activeDef = ZONES.find((z) => z.id === state.activeZoneId)!;
     const activeZone = state.zones[activeDef.id];
 
-    const ripeCount = activeZone.plots.filter((p) => plotIsRipe(p, activeDef.growMs, now)).length;
+    const ripeCount = activeZone.spots.filter((p) => plotIsRipe(p, activeDef.growMs, now)).length;
     ripeWaitTotalMs += ripeCount * TICK_MS;
 
     const wantManual =

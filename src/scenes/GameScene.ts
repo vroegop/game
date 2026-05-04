@@ -1,12 +1,16 @@
 import Phaser from "phaser";
-import { ZONES, PLOTS_PER_ZONE, ZoneDef } from "../game/zones";
+import { ZONES, ZoneDef } from "../game/zones";
 import {
-  GameState,
   buyCart,
+  buyDragRadius,
   cartCost,
-  cartIntervalMs,
+  cartRadius as cartRadiusFn,
+  cartSpeed as cartSpeedFn,
+  dragRadius as dragRadiusFn,
+  dragRadiusCost,
+  GameState,
   harvestAllRipe,
-  harvestPlot,
+  harvestInRadius,
   loadState,
   plotIsRipe,
   plotProgress,
@@ -16,7 +20,7 @@ import {
   tickCarts,
   unlockZone,
 } from "../game/state";
-import { generatePixelTextures, pickStageTexture } from "./textures";
+import { generatePixelTextures, pickCropSpriteKey } from "./textures";
 
 interface IconButton {
   container: Phaser.GameObjects.Container;
@@ -36,12 +40,15 @@ interface ZoneTab {
   lock: Phaser.GameObjects.Text;
 }
 
-interface PlotView {
+interface SpotView {
   index: number;
-  tile: Phaser.GameObjects.Image;
-  border: Phaser.GameObjects.Image;
+  sprite: Phaser.GameObjects.Image;
   bumpFactor: number;
-  baseScale: number;
+}
+
+interface CartView {
+  sprite: Phaser.GameObjects.Image;
+  glow: Phaser.GameObjects.Image;
 }
 
 const SAVE_INTERVAL_MS = 3_000;
@@ -50,11 +57,19 @@ const PIXEL_FONT = '"Courier New", monospace';
 const COLOR_RIPE_TEXT = "#ffe066";
 const COLOR_GAIN = "#9ee6b8";
 
+interface FieldRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export class GameScene extends Phaser.Scene {
   private state!: GameState;
   private lastSaveAt = 0;
 
-  private grassBg!: Phaser.GameObjects.TileSprite;
+  private soilBg!: Phaser.GameObjects.TileSprite;
+
   private headerBg!: Phaser.GameObjects.Image;
   private coinIcon!: Phaser.GameObjects.Image;
   private coinText!: Phaser.GameObjects.Text;
@@ -63,16 +78,23 @@ export class GameScene extends Phaser.Scene {
   private tabsContainer!: Phaser.GameObjects.Container;
   private tabs: ZoneTab[] = [];
 
-  private zoneContainer!: Phaser.GameObjects.Container;
-  private zoneTitle!: Phaser.GameObjects.Text;
-  private inventoryText!: Phaser.GameObjects.Text;
-  private statusText!: Phaser.GameObjects.Text;
-  private plots: PlotView[] = [];
+  private fieldContainer!: Phaser.GameObjects.Container;
+  private spots: SpotView[] = [];
+  private cartViews: CartView[] = [];
 
-  private btnHarvest!: IconButton;
+  private dragRing!: Phaser.GameObjects.Image;
+  private dragging = false;
+
+  private statusBg!: Phaser.GameObjects.Image;
+  private titleText!: Phaser.GameObjects.Text;
+  private statusText!: Phaser.GameObjects.Text;
+
   private btnSell!: IconButton;
   private btnCart!: IconButton;
+  private btnDrag!: IconButton;
   private btnUnlock!: IconButton;
+
+  private fieldRect: FieldRect = { x: 0, y: 0, w: 100, h: 100 };
 
   constructor() {
     super("game");
@@ -86,11 +108,15 @@ export class GameScene extends Phaser.Scene {
 
     this.cameras.main.setBackgroundColor("#1d2b1d");
 
-    this.grassBg = this.add.tileSprite(0, 0, 100, 100, "grass-bg").setOrigin(0, 0);
-    this.grassBg.setTileScale(2, 2);
+    this.soilBg = this.add.tileSprite(0, 0, 100, 100, "soil-bg").setOrigin(0, 0);
+
+    this.fieldContainer = this.add.container(0, 0);
+
+    this.dragRing = this.add.image(0, 0, "drag-ring").setOrigin(0.5).setVisible(false);
+    this.dragRing.setAlpha(0.85);
+    this.fieldContainer.add(this.dragRing);
 
     this.headerBg = this.add.image(0, 0, "panel-bg").setOrigin(0, 0);
-
     this.coinIcon = this.add.image(0, 0, "coin").setOrigin(0, 0.5);
     this.coinIcon.setScale(2);
 
@@ -114,35 +140,16 @@ export class GameScene extends Phaser.Scene {
     this.tabsContainer = this.add.container(0, 0);
     for (const def of ZONES) this.tabs.push(this.buildTab(def));
 
-    this.zoneContainer = this.add.container(0, 0);
+    this.statusBg = this.add.image(0, 0, "panel-bg").setOrigin(0, 0);
 
-    this.zoneTitle = this.add
+    this.titleText = this.add
       .text(0, 0, "", {
         fontFamily: PIXEL_FONT,
-        fontSize: "18px",
+        fontSize: "16px",
         color: "#e8f5d8",
         fontStyle: "bold",
       })
       .setOrigin(0.5, 0);
-    this.zoneContainer.add(this.zoneTitle);
-
-    this.inventoryText = this.add
-      .text(0, 0, "0", {
-        fontFamily: PIXEL_FONT,
-        fontSize: "13px",
-        color: "#bde0bd",
-      })
-      .setOrigin(0.5, 0);
-    this.zoneContainer.add(this.inventoryText);
-
-    for (let i = 0; i < PLOTS_PER_ZONE; i++) {
-      const tile = this.add.image(0, 0, "plot-tilled").setOrigin(0.5);
-      tile.setInteractive({ useHandCursor: true });
-      tile.on("pointerdown", () => this.onPlotTap(i));
-      const border = this.add.image(0, 0, "ripe-border").setOrigin(0.5).setVisible(false);
-      this.zoneContainer.add([tile, border]);
-      this.plots.push({ index: i, tile, border, bumpFactor: 1, baseScale: 1 });
-    }
 
     this.statusText = this.add
       .text(0, 0, "", {
@@ -151,15 +158,20 @@ export class GameScene extends Phaser.Scene {
         color: "#9ec79e",
       })
       .setOrigin(0.5, 0);
-    this.zoneContainer.add(this.statusText);
 
-    this.btnHarvest = this.makeIconButton("✋", "btn-bg", () => this.onHarvestAll());
-    this.btnSell = this.makeIconButton("$", "btn-bg", () => this.onSell());
-    this.btnCart = this.makeIconButton("+", "btn-bg-accent", () => this.onBuyCart());
+    this.btnSell = this.makeIconButton("💰", "btn-bg", () => this.onSell());
+    this.btnCart = this.makeIconButton("🚜", "btn-bg-accent", () => this.onBuyCart());
+    this.btnDrag = this.makeIconButton("✋", "btn-bg-accent", () => this.onBuyDrag());
     this.btnUnlock = this.makeIconButton("🔓", "btn-bg-warn", () => this.onUnlock());
+
+    this.input.on("pointerdown", this.onPointerDown, this);
+    this.input.on("pointermove", this.onPointerMove, this);
+    this.input.on("pointerup", this.onPointerUp, this);
 
     this.scale.on("resize", this.layout, this);
     this.layout();
+    this.rebuildSpotViews();
+    this.rebuildCartViews();
 
     this.events.on(Phaser.Scenes.Events.SHUTDOWN, () => saveState(this.state));
     window.addEventListener("beforeunload", () => saveState(this.state));
@@ -180,81 +192,53 @@ export class GameScene extends Phaser.Scene {
     const w = this.scale.width;
     const h = this.scale.height;
     const headerH = 56;
-    const tabsH = 60;
+    const tabsH = 56;
+    const statusH = 36;
     const actionH = 80;
 
-    this.grassBg.setSize(w, h);
-
     this.headerBg.setDisplaySize(w, headerH);
-
-    const coinIconW = 32;
+    const coinIconSize = 30;
     const coinGap = 8;
-    const coinTotal = coinIconW + coinGap + this.coinText.width;
-    const coinStart = Math.floor((w - coinTotal) / 2);
-    const groupY = headerH / 2 - 8;
+    const coinGroupW = coinIconSize + coinGap + this.coinText.width;
+    const coinStart = Math.floor((w - coinGroupW) / 2);
+    const groupY = Math.floor(headerH / 2 - 8);
     this.coinIcon.setPosition(coinStart, groupY);
-    this.coinText.setPosition(coinStart + coinIconW + coinGap, groupY);
+    this.coinText.setPosition(coinStart + coinIconSize + coinGap, groupY);
     this.rateText.setPosition(Math.floor(w / 2), Math.floor(headerH / 2 + 12));
 
     this.tabsContainer.setPosition(0, headerH);
     this.layoutTabs(w, tabsH);
 
-    const zoneTop = headerH + tabsH + 6;
-    const zoneBottom = h - actionH - 6;
-    const zoneH = zoneBottom - zoneTop;
+    const fieldTop = headerH + tabsH;
+    const fieldBottom = h - actionH - statusH;
+    const fieldH = Math.max(120, fieldBottom - fieldTop);
+    this.fieldRect = { x: 0, y: fieldTop, w, h: fieldH };
 
-    this.zoneContainer.setPosition(0, zoneTop);
-    this.zoneTitle.setPosition(Math.floor(w / 2), 0);
-    this.inventoryText.setPosition(Math.floor(w / 2), 26);
+    this.soilBg.setPosition(0, fieldTop).setSize(w, fieldH);
+    this.soilBg.setTilePosition(0, 0);
+    this.fieldContainer.setPosition(0, fieldTop);
 
-    const titleArea = 50;
-    const statusArea = 24;
-    const gridAreaH = zoneH - titleArea - statusArea;
-    const gridAreaW = w - 16;
-    const tileGap = 6;
+    this.statusBg.setPosition(0, fieldBottom).setDisplaySize(w, statusH);
+    this.titleText.setPosition(Math.floor(w / 2), fieldBottom + 4);
+    this.statusText.setPosition(Math.floor(w / 2), fieldBottom + 22);
 
-    const sByW = (gridAreaW - tileGap) / 2 / 32;
-    const sByH = (gridAreaH - tileGap) / 2 / 32;
-    const s = Math.max(1, Math.floor(Math.min(sByW, sByH)));
-    const cellW = 32 * s;
-    const cellH = 32 * s;
-    const tilesW = cellW * 2 + tileGap;
-    const tilesH = cellH * 2 + tileGap;
-    const gridX = Math.floor((w - tilesW) / 2);
-    const gridY = titleArea + Math.min(8, Math.floor((gridAreaH - tilesH) / 2));
-
-    const borderScale = (cellW / 16);
-
-    for (let i = 0; i < this.plots.length; i++) {
-      const col = i % 2;
-      const row = Math.floor(i / 2);
-      const px = gridX + col * (cellW + tileGap) + Math.floor(cellW / 2);
-      const py = gridY + row * (cellH + tileGap) + Math.floor(cellH / 2);
-      const p = this.plots[i];
-      p.baseScale = s;
-      p.tile.setPosition(px, py).setScale(s * p.bumpFactor);
-      p.border.setPosition(px, py).setScale(borderScale * p.bumpFactor);
-    }
-
-    this.statusText.setPosition(Math.floor(w / 2), gridY + tilesH + 6);
-
-    const buttons = [this.btnHarvest, this.btnSell, this.btnCart, this.btnUnlock];
+    const buttons = [this.btnSell, this.btnCart, this.btnDrag, this.btnUnlock];
     const visible = buttons.filter((b) => b.container.visible);
-    const btnSize = 64;
-    const totalBtnW = visible.length * btnSize + (visible.length - 1) * 14;
-    const gridBottomAbs = zoneTop + gridY + tilesH;
-    const minActionY = gridBottomAbs + 36 + Math.floor(btnSize / 2);
-    const desiredActionY = h - Math.floor(btnSize / 2) - 20;
-    const actionY = Math.max(minActionY, desiredActionY);
+    const btnSize = 60;
+    const totalBtnW = visible.length * btnSize + Math.max(0, visible.length - 1) * 14;
+    const actionY = h - Math.floor(actionH / 2);
     let bx = Math.floor((w - totalBtnW) / 2) + Math.floor(btnSize / 2);
     for (const b of visible) {
       this.placeIconButton(b, bx, actionY, btnSize);
       bx += btnSize + 14;
     }
+
+    this.layoutSpots();
+    this.layoutCarts();
   };
 
   private layoutTabs(w: number, tabsH: number) {
-    const tabSize = 56;
+    const tabSize = 48;
     const gap = 10;
     const totalW = this.tabs.length * tabSize + (this.tabs.length - 1) * gap;
     let x = Math.floor((w - totalW) / 2) + Math.floor(tabSize / 2);
@@ -262,8 +246,8 @@ export class GameScene extends Phaser.Scene {
     for (const tab of this.tabs) {
       tab.container.setPosition(x, y);
       tab.bg.setDisplaySize(tabSize, tabSize);
-      tab.icon.setFontSize(28);
-      tab.lock.setFontSize(20);
+      tab.icon.setFontSize(24);
+      tab.lock.setFontSize(18);
       x += tabSize + gap;
     }
   }
@@ -273,24 +257,29 @@ export class GameScene extends Phaser.Scene {
     const bg = this.add.image(0, 0, "tab-bg").setOrigin(0.5);
     bg.setInteractive({ useHandCursor: true });
     bg.on("pointerdown", () => this.onTabTap(def.id));
-    const icon = this.add.text(0, 0, def.emoji, { fontSize: "28px" }).setOrigin(0.5);
-    const lock = this.add.text(14, -14, "🔒", { fontSize: "20px" }).setOrigin(0.5).setVisible(false);
+    const icon = this.add.text(0, 0, def.emoji, { fontSize: "24px" }).setOrigin(0.5);
+    const lock = this.add.text(12, -12, "🔒", { fontSize: "16px" }).setOrigin(0.5).setVisible(false);
     c.add([bg, icon, lock]);
     this.tabsContainer.add(c);
     return { def, container: c, bg, icon, lock };
   }
 
-  private makeIconButton(icon: string, bgKey: string, onClick: () => void): IconButton {
+  private makeIconButton(label: string, bgKey: string, onClick: () => void): IconButton {
     const c = this.add.container(0, 0);
     const bg = this.add.image(0, 0, bgKey).setOrigin(0.5);
     bg.setInteractive({ useHandCursor: true });
     const iconText = this.add
-      .text(0, -4, icon, { fontFamily: PIXEL_FONT, fontSize: "26px", color: "#ffffff", fontStyle: "bold" })
+      .text(0, -2, label, {
+        fontFamily: PIXEL_FONT,
+        fontSize: "22px",
+        color: "#ffffff",
+        fontStyle: "bold",
+      })
       .setOrigin(0.5);
     const badge = this.add
-      .text(0, 18, "", {
+      .text(0, 16, "", {
         fontFamily: PIXEL_FONT,
-        fontSize: "12px",
+        fontSize: "11px",
         color: "#ffffff",
         fontStyle: "bold",
       })
@@ -307,7 +296,8 @@ export class GameScene extends Phaser.Scene {
       onClick,
     };
 
-    bg.on("pointerdown", () => {
+    bg.on("pointerdown", (_p: Phaser.Input.Pointer, _x: number, _y: number, ev: Phaser.Types.Input.EventData) => {
+      ev.stopPropagation();
       if (!btn.enabled) {
         this.shake(c);
         return;
@@ -322,7 +312,7 @@ export class GameScene extends Phaser.Scene {
   private placeIconButton(btn: IconButton, x: number, y: number, size: number) {
     btn.container.setPosition(x, y);
     btn.bg.setDisplaySize(size, size);
-    btn.icon.setFontSize(Math.floor(size * 0.42)).setY(-Math.floor(size * 0.08));
+    btn.icon.setFontSize(Math.floor(size * 0.36)).setY(-Math.floor(size * 0.08));
     btn.badge.setY(Math.floor(size * 0.32));
   }
 
@@ -347,37 +337,145 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  private rebuildSpotViews() {
+    for (const sv of this.spots) sv.sprite.destroy();
+    this.spots = [];
+    const zoneDef = this.activeZoneDef();
+    const zone = this.state.zones[zoneDef.id];
+    for (let i = 0; i < zone.spots.length; i++) {
+      const sprite = this.add.image(0, 0, "crop-empty").setOrigin(0.5, 1);
+      this.fieldContainer.add(sprite);
+      this.spots.push({ index: i, sprite, bumpFactor: 1 });
+    }
+    this.fieldContainer.bringToTop(this.dragRing);
+    this.layoutSpots();
+  }
+
+  private rebuildCartViews() {
+    for (const cv of this.cartViews) {
+      cv.sprite.destroy();
+      cv.glow.destroy();
+    }
+    this.cartViews = [];
+    const zoneDef = this.activeZoneDef();
+    const zone = this.state.zones[zoneDef.id];
+    for (let i = 0; i < zone.carts.length; i++) {
+      const glow = this.add.image(0, 0, "drag-ring").setOrigin(0.5);
+      glow.setAlpha(0.18);
+      const sprite = this.add.image(0, 0, "cart").setOrigin(0.5);
+      this.fieldContainer.add([glow, sprite]);
+      this.cartViews.push({ sprite, glow });
+    }
+    this.fieldContainer.bringToTop(this.dragRing);
+    this.layoutCarts();
+  }
+
+  private layoutSpots() {
+    const zone = this.state.zones[this.activeZoneDef().id];
+    const fr = this.fieldRect;
+    const baseScale = Math.max(2, Math.min(4, Math.floor(fr.w / (7 * 16))));
+    for (let i = 0; i < this.spots.length && i < zone.spots.length; i++) {
+      const spot = zone.spots[i];
+      const sv = this.spots[i];
+      const sx = spot.x * fr.w;
+      const sy = spot.y * fr.h;
+      sv.sprite.setPosition(sx, sy);
+      sv.sprite.setScale(baseScale * sv.bumpFactor);
+    }
+  }
+
+  private layoutCarts() {
+    const zone = this.state.zones[this.activeZoneDef().id];
+    const fr = this.fieldRect;
+    const cartScale = Math.max(2, Math.floor(Math.min(fr.w, fr.h) / 250));
+    const radiusNorm = cartRadiusFn(zone.cartLevel);
+    const radiusPx = radiusNorm * Math.min(fr.w, fr.h);
+    for (let i = 0; i < this.cartViews.length && i < zone.carts.length; i++) {
+      const cart = zone.carts[i];
+      const cv = this.cartViews[i];
+      const sx = cart.x * fr.w;
+      const sy = cart.y * fr.h;
+      cv.sprite.setPosition(sx, sy);
+      cv.sprite.setScale(cartScale);
+      const flip = Math.cos(cart.facing) < 0;
+      cv.sprite.setFlipX(flip);
+      cv.glow.setPosition(sx, sy);
+      cv.glow.setScale((radiusPx * 2) / 64);
+    }
+  }
+
   private onTabTap(zoneId: string) {
     const zone = this.state.zones[zoneId];
     if (!zone) return;
     if (!zone.unlocked) {
       this.state.activeZoneId = zoneId;
+      this.rebuildSpotViews();
+      this.rebuildCartViews();
       return;
     }
-    setActiveZone(this.state, zoneId);
+    if (setActiveZone(this.state, zoneId)) {
+      this.rebuildSpotViews();
+      this.rebuildCartViews();
+    }
   }
 
-  private onPlotTap(plotIndex: number) {
+  private onPointerDown(pointer: Phaser.Input.Pointer) {
+    if (!this.isInsideField(pointer.x, pointer.y)) return;
+    this.dragging = true;
+    this.dragRing.setVisible(true);
+    this.harvestAtPointer(pointer);
+  }
+
+  private onPointerMove(pointer: Phaser.Input.Pointer) {
+    if (!this.dragging) return;
+    if (!this.isInsideField(pointer.x, pointer.y)) {
+      this.dragRing.setVisible(false);
+      return;
+    }
+    this.dragRing.setVisible(true);
+    this.harvestAtPointer(pointer);
+  }
+
+  private onPointerUp() {
+    this.dragging = false;
+    this.dragRing.setVisible(false);
+  }
+
+  private isInsideField(x: number, y: number): boolean {
+    const fr = this.fieldRect;
+    return x >= fr.x && x <= fr.x + fr.w && y >= fr.y && y <= fr.y + fr.h;
+  }
+
+  private harvestAtPointer(pointer: Phaser.Input.Pointer) {
+    const fr = this.fieldRect;
+    const localX = pointer.x - fr.x;
+    const localY = pointer.y - fr.y;
     const zoneDef = this.activeZoneDef();
     const zone = this.state.zones[zoneDef.id];
     if (!zone.unlocked) return;
-    const now = Date.now();
-    if (harvestPlot(this.state, zoneDef.id, plotIndex, now)) {
-      const pv = this.plots[plotIndex];
-      this.spawnFloat(pv.tile.x, pv.tile.y, "+1", COLOR_RIPE_TEXT);
-      pv.bumpFactor = 1.25;
-    }
-  }
 
-  private onHarvestAll() {
-    const zoneDef = this.activeZoneDef();
-    const now = Date.now();
-    const n = harvestAllRipe(this.state, zoneDef.id, now);
-    if (n > 0) {
-      this.spawnFloat(this.btnHarvest.container.x, this.btnHarvest.container.y - 32, `+${n}`, COLOR_RIPE_TEXT);
-      for (const pv of this.plots) pv.bumpFactor = 1.2;
+    const r = dragRadiusFn(this.state.dragRadiusLevel);
+    const cx = localX / fr.w;
+    const cy = localY / fr.h;
+    const radiusPx = r * Math.min(fr.w, fr.h);
+
+    this.dragRing.setPosition(localX, localY);
+    this.dragRing.setScale((radiusPx * 2) / 64);
+
+    const before = zone.inventory;
+    const harvested = harvestInRadius(this.state, zoneDef.id, cx, cy, r, Date.now());
+    void before;
+    if (harvested > 0) {
+      for (let i = 0; i < zone.spots.length; i++) {
+        const spot = zone.spots[i];
+        const dx = spot.x - cx;
+        const dy = spot.y - cy;
+        if (dx * dx + dy * dy <= r * r) {
+          this.spots[i].bumpFactor = 1.45;
+        }
+      }
+      this.spawnFloat(localX, localY - 12, `+${harvested}`, COLOR_RIPE_TEXT);
     }
-    void zoneDef;
   }
 
   private onSell() {
@@ -393,6 +491,13 @@ export class GameScene extends Phaser.Scene {
     const zoneDef = this.activeZoneDef();
     if (buyCart(this.state, zoneDef.id)) {
       this.spawnFloat(this.btnCart.container.x, this.btnCart.container.y - 32, "Cart+1", COLOR_GAIN);
+      this.rebuildCartViews();
+    }
+  }
+
+  private onBuyDrag() {
+    if (buyDragRadius(this.state)) {
+      this.spawnFloat(this.btnDrag.container.x, this.btnDrag.container.y - 32, "Reach+1", COLOR_GAIN);
     }
   }
 
@@ -401,6 +506,8 @@ export class GameScene extends Phaser.Scene {
     if (unlockZone(this.state, zoneDef.id, Date.now())) {
       setActiveZone(this.state, zoneDef.id);
       this.spawnFloat(this.btnUnlock.container.x, this.btnUnlock.container.y - 32, "Unlocked!", COLOR_GAIN);
+      this.rebuildSpotViews();
+      this.rebuildCartViews();
     }
   }
 
@@ -424,54 +531,38 @@ export class GameScene extends Phaser.Scene {
       tab.lock.setVisible(!z.unlocked);
     }
 
-    this.zoneTitle.setText(zoneDef.name.toUpperCase());
-    this.inventoryText.setText(`BASKET: ${formatNumber(zone.inventory)}`);
+    this.titleText.setText(`${zoneDef.name.toUpperCase()}  -  BASKET ${zone.inventory}`);
 
-    const pulse = (Math.sin(this.time.now / 220) + 1) / 2;
-    let nextRipeMs = Infinity;
     let ripeCount = 0;
-
-    for (const pv of this.plots) {
-      const plot = zone.plots[pv.index];
-      const ripe = plotIsRipe(plot, zoneDef.growMs, now);
-      const progress = plotProgress(plot, zoneDef.growMs, now);
-
-      const textureKey = !zone.unlocked
-        ? "plot-locked"
-        : pickStageTexture(zoneDef.id, progress, ripe);
-      pv.tile.setTexture(textureKey);
-
-      pv.bumpFactor = Phaser.Math.Linear(pv.bumpFactor, 1, 0.18);
-
-      pv.border.setVisible(ripe && zone.unlocked);
-      pv.border.setAlpha(ripe ? 0.35 + 0.45 * pulse : 0);
-
-      if (ripe) ripeCount++;
-      else {
-        const remaining = zoneDef.growMs - (now - plot.plantedAt);
-        if (remaining < nextRipeMs) nextRipeMs = remaining;
-      }
+    for (let i = 0; i < this.spots.length && i < zone.spots.length; i++) {
+      const spot = zone.spots[i];
+      const ripe = plotIsRipe(spot, zoneDef.growMs, now);
+      const progress = plotProgress(spot, zoneDef.growMs, now);
+      const key = !zone.unlocked
+        ? "crop-empty"
+        : pickCropSpriteKey(zoneDef.id, progress, ripe);
+      this.spots[i].sprite.setTexture(key);
+      this.spots[i].sprite.setVisible(zone.unlocked && key !== "crop-empty");
+      this.spots[i].bumpFactor = Phaser.Math.Linear(this.spots[i].bumpFactor, 1, 0.18);
+      if (ripe) ripeCount += 1;
     }
 
+    this.layoutSpots();
+    this.layoutCarts();
+
     if (!zone.unlocked) {
-      this.statusText.setText(`LOCKED  unlock for ${formatNumber(zoneDef.unlockCost)}`);
-    } else if (ripeCount > 0 && zone.cartLevel === 0) {
-      this.statusText.setText(`${ripeCount} READY — TAP TO HARVEST`);
-    } else if (zone.cartLevel === 0) {
-      this.statusText.setText(`NEXT IN ${fmtCountdown(nextRipeMs)}`);
+      this.statusText.setText(`LOCKED  -  unlock for ${formatNumber(zoneDef.unlockCost)}`);
+    } else if (ripeCount > 0) {
+      this.statusText.setText(`${ripeCount} READY  -  drag to harvest`);
     } else {
-      const sec = (cartIntervalMs(zone.cartLevel) / 1000).toFixed(1);
-      this.statusText.setText(`CART Lv${zone.cartLevel} — auto every ${sec}s`);
+      this.statusText.setText(`${zone.spots.length} crops growing`);
     }
 
     if (zone.unlocked) {
       this.btnUnlock.container.setVisible(false);
-      this.btnHarvest.container.setVisible(true);
       this.btnSell.container.setVisible(true);
       this.btnCart.container.setVisible(true);
-
-      this.setButtonEnabled(this.btnHarvest, ripeCount > 0);
-      this.setButtonBadge(this.btnHarvest, ripeCount > 0 ? `${ripeCount}` : "");
+      this.btnDrag.container.setVisible(true);
 
       this.setButtonEnabled(this.btnSell, zone.inventory > 0);
       this.setButtonBadge(
@@ -479,14 +570,18 @@ export class GameScene extends Phaser.Scene {
         zone.inventory > 0 ? `${formatNumber(zone.inventory * zoneDef.sellPrice)}` : "",
       );
 
-      const cost = cartCost(zone.cartLevel);
-      this.setButtonEnabled(this.btnCart, this.state.coins >= cost);
-      this.setButtonBadge(this.btnCart, formatNumber(cost));
+      const ccost = cartCost(zone.cartLevel);
+      this.setButtonEnabled(this.btnCart, this.state.coins >= ccost);
+      this.setButtonBadge(this.btnCart, formatNumber(ccost));
+
+      const dcost = dragRadiusCost(this.state.dragRadiusLevel);
+      this.setButtonEnabled(this.btnDrag, this.state.coins >= dcost);
+      this.setButtonBadge(this.btnDrag, formatNumber(dcost));
     } else {
       this.btnUnlock.container.setVisible(true);
-      this.btnHarvest.container.setVisible(false);
       this.btnSell.container.setVisible(false);
       this.btnCart.container.setVisible(false);
+      this.btnDrag.container.setVisible(false);
 
       this.setButtonEnabled(this.btnUnlock, this.state.coins >= zoneDef.unlockCost);
       this.setButtonBadge(this.btnUnlock, formatNumber(zoneDef.unlockCost));
@@ -520,13 +615,15 @@ export class GameScene extends Phaser.Scene {
 
   private computeCoinsPerSec(): number {
     let total = 0;
-    for (const def of ZONES) {
-      const zone = this.state.zones[def.id];
-      if (!zone.unlocked) continue;
-      const isActive = def.id === this.state.activeZoneId;
-      if (isActive && zone.cartLevel > 0) {
-        total += (1000 / cartIntervalMs(zone.cartLevel)) * def.sellPrice;
-      }
+    const zoneDef = this.activeZoneDef();
+    const zone = this.state.zones[zoneDef.id];
+    if (zone.unlocked && zone.cartLevel > 0) {
+      const speed = cartSpeedFn(zone.cartLevel);
+      const r = cartRadiusFn(zone.cartLevel);
+      const sweptAreaPerSec = 2 * r * speed;
+      const cropDensity = zone.spots.length;
+      const harvestPerSec = sweptAreaPerSec * cropDensity * 0.04 * zone.cartLevel;
+      total = harvestPerSec * zoneDef.sellPrice;
     }
     return total;
   }
@@ -537,13 +634,4 @@ function formatNumber(n: number): string {
   if (n < 1_000_000) return (n / 1000).toFixed(n < 10_000 ? 1 : 0) + "K";
   if (n < 1_000_000_000) return (n / 1_000_000).toFixed(n < 10_000_000 ? 1 : 0) + "M";
   return (n / 1_000_000_000).toFixed(1) + "B";
-}
-
-function fmtCountdown(ms: number): string {
-  if (!isFinite(ms) || ms <= 0) return "0s";
-  const s = Math.ceil(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${m}:${r.toString().padStart(2, "0")}`;
 }
