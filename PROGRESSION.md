@@ -258,7 +258,199 @@ These are tuned to be reachable mid-game. Maxing all greenhouse
 upgrades represents a significant late-game investment but doesn't
 gate progress.
 
-## 11. Menu structure
+## 11. IOM-inspired deep systems
+
+The reference game (Idle Obelisk Miner) has been running for years and
+has a well-tuned set of interlocking long-term systems. We want the
+same long-term depth, theme-translated into farming. These systems
+unlock progressively as the player advances through the tier ladder
+in §2 — the early game stays simple, then more layers reveal as
+players reach the appropriate tier or boss-equivalent.
+
+### A. Cards (collectables) — unlocks tier 3+
+
+Every crop has a **Card**. Cards have three states:
+
+1. **Locked** — invisible until you harvest enough of the crop to
+   unlock the entry. Threshold is `100 × tier_index`, so Wheat
+   unlocks at 100 harvested, Carrots at 200, Corn at 300, …, Lotus
+   at 1 200.
+2. **Unlocked** — gives a permanent **+10 % yield** for that crop.
+3. **Gilded** — costs gems to gild (50 × tier_index, so 50 → 600
+   across the ladder). Adds **+25 % yield** on top of the unlocked
+   bonus, and **+5 % gem drop rate** for that crop.
+
+Cards live in their own menu tab `🃏 Cards`. Each card row shows the
+zone icon, current state, and the action (collect more / gild for X
+gems). This creates a parallel collection meta-loop that doesn't
+interfere with main progression but rewards going deep on each tier.
+
+### B. Almanac (challenges / achievements) — unlocks tier 2+
+
+A scrollable list of one-time tasks. Three rough categories, mixed:
+
+| Category | Examples |
+|---|---|
+| Volume | "Harvest 1 000 wheat", "Sell 100 K coins of crops" |
+| Mastery | "Buy Cart L10 in any zone", "Reach Yield L20", "Gild 3 Cards" |
+| Exploration | "Unlock Tier 5", "Trigger 10 different weathers", "Survive a Storm" |
+
+Each task pays out **Almanac Tokens** (a third permanent currency).
+Tokens spent in an Almanac shop on:
+
+- Permanent +1 % to all coin earnings (cap 50)
+- Permanent +1 % to all gem drop rate (cap 25)
+- Unlock a 2nd boost slot (boosts can stack 2 at a time)
+- Cosmetic banner / cart skin
+
+Maxed Almanac is hundreds of hours of play.
+
+### C. Prestige — "Sell the Farm" — unlocks tier 5+
+
+Soft reset triggered manually once tier 5 is unlocked. Resets:
+
+- All zone progress (cart, yield, growth, price, inventory, spots)
+- Coin balance
+- Active boosts and weather
+
+Keeps:
+
+- Almanac progress and tokens
+- Cards (and their gild state)
+- Greenhouse upgrades
+- Gem balance and gem-shop items
+- Drag radius
+
+Awards **Heirloom Seeds** = `floor(highest_tier_reached_squared / 4)`.
+Heirloom Seeds spent in a Heirloom shop on:
+
+- +1 % all yield per seed (no cap, asymptotic value)
+- +1 % all sell price per seed
+- −0.5 % all grow time per seed (floor at 5 % of base)
+- Unlock a starter cart (begin each prestige with Cart L1)
+- Unlock a starter yield bonus
+
+Asymptote at ~50 × multiplier across many prestiges. Each prestige
+takes longer than the last but rewards more, so the loop is
+self-pacing.
+
+### D. Contracts / Daily Orders — unlocks tier 4+
+
+Three contracts every 24 real-time hours. Each contract requests a
+specific bundle of crops (e.g. "200 wheat + 50 corn") in exchange
+for a coin payout, gems, or Almanac tokens. Contracts expire if
+unfulfilled. Players can reroll all 3 once per day for free, or
+spend gems for additional rerolls.
+
+This adds a daily-touch loop — log in, glance at contracts, decide
+what to harvest today. No FOMO since rewards are modest and not
+required for progression.
+
+### E. Trinkets (random items) — unlocks tier 6+
+
+Equippable buff items dropped from **Curio Chests**. Chests open
+randomly when harvesting (very rare base rate, scaling with tier),
+or buyable for gems. Items have rarity tiers:
+
+| Rarity | Drop chance | Power |
+|---|---|---|
+| Common | 70 % | +X % to one stat |
+| Rare | 25 % | +X % to two stats |
+| Epic | 4 % | Unique conditional buff |
+| Legendary | 1 % | Major effect (e.g. +30 s storm protection) |
+| Divine | 1 / 25 000 | Game-changer (e.g. carts harvest 3 spots at once) |
+
+Six equip slots. Surplus trinkets melt into **Trinket Dust**, a
+currency used to reroll chest opens.
+
+### F. Statues / Monuments — unlocks tier 7+
+
+Crafted from huge resource bundles. Each statue gives a passive
+global buff. Three tiers per statue:
+
+1. **Built** — basic effect, e.g. "+5 % grow speed Wheat".
+2. **Gilded** — 3× effect; requires ALL statues built.
+3. **Platinized** — 5× effect; requires ALL statues gilded.
+
+Statues only matter for the absolute end-game (months in). Their
+existence motivates the entire late-game economy.
+
+### G. Skill Tree — unlocks via Prestige
+
+Spend **Skill Points** (earned 1 per Almanac task completed, plus
+gem-shop purchase) on a tree of mutually-exclusive perks:
+
+- **Greener Thumb** — +1 % yield per skill point invested
+- **Faster Carts** — +1 % cart speed per point
+- **Bigger Pockets** — +1 % offline cap per point
+- **Lucky Days** — +1 % gem drop per point
+
+Each branch has 50 nodes; total tree has 200+ nodes. Players
+specialize over many prestiges.
+
+### H. Pets — unlocks tier 9+
+
+Companion sprites that wander the field alongside carts. Each pet
+has:
+
+- A unique passive buff (e.g. "+10 % yield Wheat")
+- A level (1–100) that scales the buff
+- An XP requirement to level (gain XP from harvesting)
+
+Pets cost 200 gems each from the shop. Total Pet Level is required
+to unlock later pets, creating a long collection chain.
+
+### I. Burst Tools (Active Abilities) — unlocks tier 4+
+
+Cooldown-based abilities filled by play:
+
+- **Sprinkler Burst** — instantly waters all plots; everything
+  ripens.
+- **Fertilizer Bomb** — next 30 s, all yields ×3.
+- **Bee Swarm** — guarantees the next 10 plots drop a gem.
+- **Pollen Storm** — converts current ripe crops directly to gems.
+
+Each has a charge meter that fills via play. Once a tool's charge
+regen is high enough, **Auto-Cast** is unlocked and the tool fires
+automatically.
+
+### J. Construct / Greenhouse Research — unlocks tier 9+
+
+A research lab where Pollen (gained from Wild Patches in §A) is
+spent on permanent unlocks of NEW MECHANICS:
+
+- Reveal **Moon Phases** (passive 8-phase rotation, each phase a
+  global buff/penalty)
+- Reveal **Wild Patches** (rare lucky harvest spots that drop Pollen)
+- Reveal **Heirloom Crops** (1 % chance harvested crop is one tier
+  higher)
+
+Construct nodes are intentionally slow. A player at this stage funnels
+multiple prestige cycles of Pollen into one research node.
+
+## 11.B Implementation order for the IOM-inspired systems
+
+Each system below is independent and can ship in its own commit.
+The order is roughly cheapest → most expensive in code.
+
+| Phase | System | Status |
+|---|---|---|
+| **A** | Cards | ✅ |
+| **B** | Almanac & tokens | ⏳ |
+| **C** | Prestige & Heirloom Seeds | ⏳ |
+| **I** | Burst Tools | ⏳ |
+| **D** | Daily Contracts | ⏳ |
+| **E** | Trinkets | ⏳ |
+| **G** | Skill Tree | ⏳ |
+| **F** | Statues & Monuments | ⏳ |
+| **J** | Construct / Moon Phases / Wild Patches | ⏳ |
+| **H** | Pets | ⏳ |
+
+Targeting 4–6 weeks of dev time across all phases. Each phase adds
+one menu tab or sub-tab; players never see all this at once because
+unlocks are gated by tier progression.
+
+## 12. Menu structure
 
 The top bar has a single ☰ button that opens a modal menu with
 tabs. The action bar at the bottom shrinks to just the **Sell**

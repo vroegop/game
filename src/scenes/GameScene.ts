@@ -20,8 +20,11 @@ import {
   effectivePriceMult,
   effectiveYield,
   BOOST_GEM_COST,
+  cardGildCost,
+  cardThreshold,
   GameState,
   GEM_SHOP_ITEMS,
+  gildCard,
   GREENHOUSE_ENTRIES,
   gemShopItemCost,
   growthCost,
@@ -40,7 +43,7 @@ import {
 } from "../game/state";
 import { generatePixelTextures, pickCropSpriteKey } from "./textures";
 
-type MenuTab = "upgrades" | "greenhouse" | "boosts" | "shop";
+type MenuTab = "upgrades" | "cards" | "greenhouse" | "boosts" | "shop";
 
 interface MenuRow {
   id: string;
@@ -781,15 +784,17 @@ export class GameScene extends Phaser.Scene {
     this.menuOverlay.add(closeBtn.container);
     (this.menuOverlay as any).closeBtn = closeBtn;
 
-    const tabIds: MenuTab[] = ["upgrades", "greenhouse", "boosts", "shop"];
+    const tabIds: MenuTab[] = ["upgrades", "cards", "greenhouse", "boosts", "shop"];
     const tabIcons: Record<MenuTab, string> = {
       upgrades: "🌾",
+      cards: "🃏",
       greenhouse: "🏠",
       boosts: "⚡",
       shop: "💎",
     };
     const tabNames: Record<MenuTab, string> = {
       upgrades: "Farm Upgrades",
+      cards: "Crop Cards",
       greenhouse: "Greenhouse",
       boosts: "Boosts",
       shop: "Gem Shop",
@@ -989,6 +994,7 @@ export class GameScene extends Phaser.Scene {
 
     const rows: Array<MenuRow> = [];
     if (this.menuTab === "upgrades") rows.push(...this.upgradeRows());
+    else if (this.menuTab === "cards") rows.push(...this.cardRows());
     else if (this.menuTab === "greenhouse") rows.push(...this.greenhouseRows());
     else if (this.menuTab === "boosts") rows.push(...this.boostRows());
     else if (this.menuTab === "shop") rows.push(...this.shopRows());
@@ -1142,6 +1148,52 @@ export class GameScene extends Phaser.Scene {
         },
       },
     ];
+  }
+
+  private cardRows(): MenuRow[] {
+    return ZONES.map((def, idx) => {
+      const zone = this.state.zones[def.id];
+      const threshold = cardThreshold(idx);
+      const progress = Math.min(zone.totalHarvested, threshold);
+      let stat: string;
+      let cost: string;
+      let canBuy: boolean;
+      let onBuy: () => void;
+      if (zone.cardGilded) {
+        stat = "GILDED  +35% yield";
+        cost = "DONE";
+        canBuy = false;
+        onBuy = () => {};
+      } else if (zone.cardUnlocked) {
+        const gildPrice = cardGildCost(idx);
+        stat = "+10% yield";
+        cost = `${gildPrice}💎`;
+        canBuy = this.state.gems >= gildPrice;
+        onBuy = () => {
+          gildCard(this.state, def.id);
+        };
+      } else {
+        stat = `${formatNumber(progress)}/${formatNumber(threshold)}`;
+        cost = "LOCKED";
+        canBuy = false;
+        onBuy = () => {};
+      }
+      const desc = zone.cardGilded
+        ? `${def.name} card is gilded: +10% base + 25% gild = +35% yield in this zone, plus +5% gem drop chance.`
+        : zone.cardUnlocked
+          ? `${def.name} card unlocked. +10% yield in this zone. Gild for an extra +25% yield and +5% gem drops.`
+          : `Harvest ${formatNumber(threshold)} ${def.name} crops to unlock its card. Cards permanently boost yield.`;
+      return {
+        id: `card-${def.id}`,
+        icon: def.emoji,
+        name: `${def.name} Card`,
+        description: desc,
+        stat,
+        cost,
+        canBuy,
+        onBuy,
+      };
+    });
   }
 
   private greenhouseRows(): MenuRow[] {

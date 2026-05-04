@@ -25,6 +25,9 @@ export interface ZoneState {
   growthLevel: number;
   priceLevel: number;
   carts: Cart[];
+  totalHarvested: number;
+  cardUnlocked: boolean;
+  cardGilded: boolean;
 }
 
 export type BoostKind = "fertilizer" | "sunshine" | "market" | "lucky";
@@ -196,6 +199,9 @@ function freshZoneState(z: { id: string; unlockCost: number }): ZoneState {
     growthLevel: 0,
     priceLevel: 0,
     carts: [],
+    totalHarvested: 0,
+    cardUnlocked: false,
+    cardGilded: false,
   };
 }
 
@@ -260,6 +266,9 @@ export function loadState(): GameState {
       if (typeof zone.yieldLevel !== "number") zone.yieldLevel = 0;
       if (typeof zone.growthLevel !== "number") zone.growthLevel = 0;
       if (typeof zone.priceLevel !== "number") zone.priceLevel = 0;
+      if (typeof zone.totalHarvested !== "number") zone.totalHarvested = 0;
+      if (typeof zone.cardUnlocked !== "boolean") zone.cardUnlocked = false;
+      if (typeof zone.cardGilded !== "boolean") zone.cardGilded = false;
     }
     if (!parsed.activeZoneId || !parsed.zones[parsed.activeZoneId]?.unlocked) {
       parsed.activeZoneId = ZONES[0].id;
@@ -334,6 +343,43 @@ export function effectiveYield(yieldLevel: number, state: GameState, now: number
   return y;
 }
 
+export function cardYieldMult(zone: ZoneState): number {
+  let m = 1;
+  if (zone.cardUnlocked) m += 0.1;
+  if (zone.cardGilded) m += 0.25;
+  return m;
+}
+
+export function cardThreshold(zoneIndex: number): number {
+  return 100 * (zoneIndex + 1);
+}
+
+export function cardGildCost(zoneIndex: number): number {
+  return 50 * (zoneIndex + 1);
+}
+
+export function gildCard(state: GameState, zoneId: string): boolean {
+  const idx = ZONES.findIndex((z) => z.id === zoneId);
+  if (idx < 0) return false;
+  const zone = state.zones[zoneId];
+  if (!zone.cardUnlocked || zone.cardGilded) return false;
+  const cost = cardGildCost(idx);
+  if (state.gems < cost) return false;
+  state.gems -= cost;
+  zone.cardGilded = true;
+  return true;
+}
+
+function recordHarvest(state: GameState, zoneId: string, count: number): void {
+  const idx = ZONES.findIndex((z) => z.id === zoneId);
+  if (idx < 0) return;
+  const zone = state.zones[zoneId];
+  zone.totalHarvested += count;
+  if (!zone.cardUnlocked && zone.totalHarvested >= cardThreshold(idx)) {
+    zone.cardUnlocked = true;
+  }
+}
+
 export function effectivePriceMult(priceLevel: number, state: GameState, now: number): number {
   let m = 1 + priceLevel * PRICE_PER_LEVEL;
   m += state.greenhouse.compost * GREENHOUSE_COMPOST_PER;
@@ -387,7 +433,7 @@ export function harvestInRadius(
   const zone = state.zones[zoneId];
   if (!zone.unlocked) return 0;
   const grow = effectiveGrowMs(zoneDef.growMs, zone.growthLevel, state, now);
-  const yieldPer = effectiveYield(zone.yieldLevel, state, now);
+  const yieldPer = effectiveYield(zone.yieldLevel, state, now) * cardYieldMult(zone);
   const r2 = r * r;
   let n = 0;
   for (const spot of zone.spots) {
@@ -401,6 +447,7 @@ export function harvestInRadius(
       n += 1;
     }
   }
+  if (n > 0) recordHarvest(state, zoneId, n);
   return n;
 }
 
@@ -410,7 +457,7 @@ export function harvestAllRipe(state: GameState, zoneId: string, now: number): n
   const zone = state.zones[zoneId];
   if (!zone.unlocked) return 0;
   const grow = effectiveGrowMs(zoneDef.growMs, zone.growthLevel, state, now);
-  const yieldPer = effectiveYield(zone.yieldLevel, state, now);
+  const yieldPer = effectiveYield(zone.yieldLevel, state, now) * cardYieldMult(zone);
   let n = 0;
   for (const spot of zone.spots) {
     if (plotIsRipe(spot, grow, now)) {
@@ -420,6 +467,7 @@ export function harvestAllRipe(state: GameState, zoneId: string, now: number): n
       n += 1;
     }
   }
+  if (n > 0) recordHarvest(state, zoneId, n);
   return n;
 }
 
@@ -898,8 +946,9 @@ export function tickCarts(
     const r2 = r * r;
     const cartSpd = cartSpeed(zone.cartLevel, state);
     const grow = effectiveGrowMs(zoneDef.growMs, zone.growthLevel, state, now);
-    const yieldPer = effectiveYield(zone.yieldLevel, state, now);
+    const yieldPer = effectiveYield(zone.yieldLevel, state, now) * cardYieldMult(zone);
     const inactiveScale = isActive ? 1 : inactiveBase;
+    let cartHarvestCount = 0;
 
     for (const cart of zone.carts) {
       cart.x += cart.vx * dt * inactiveScale;
@@ -953,9 +1002,11 @@ export function tickCarts(
           if (state.gemUpgrades.luckyCart && Math.random() < 0.03) {
             state.gems += 1;
           }
+          cartHarvestCount += 1;
         }
       }
     }
+    if (cartHarvestCount > 0) recordHarvest(state, zoneDef.id, cartHarvestCount);
   }
 
   if (state.gemUpgrades.autoSell) {
@@ -1003,14 +1054,17 @@ function applyOfflineProgress(state: GameState): void {
     const zone = state.zones[zoneDef.id];
     if (!zone.unlocked) continue;
     const grow = effectiveGrowMs(zoneDef.growMs, zone.growthLevel, state, now);
-    const yieldPer = effectiveYield(zone.yieldLevel, state, now);
+    const yieldPer = effectiveYield(zone.yieldLevel, state, now) * cardYieldMult(zone);
+    let offGrown = 0;
     for (const spot of zone.spots) {
       const since = now - spot.plantedAt;
       if (since >= grow) {
         spot.plantedAt = now;
         zone.inventory += yieldPer;
+        offGrown += 1;
       }
     }
+    if (offGrown > 0) recordHarvest(state, zoneDef.id, offGrown);
     if (zone.cartLevel > 0) {
       const r = cartRadius(zone.cartLevel);
       const speed = cartSpeed(zone.cartLevel, state);
