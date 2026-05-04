@@ -1,20 +1,43 @@
 import {
   GameState,
   buyCart,
+  buyDragRadius,
+  buyGrowth,
+  buyPrice,
+  buyYield,
   cartCost,
   createInitialState,
+  dragRadius as dragRadiusFn,
+  dragRadiusCost,
+  effectiveGrowMs,
+  effectivePriceMult,
+  effectiveYield,
+  growthCost,
   harvestAllRipe,
+  harvestInRadius,
   plotIsRipe,
+  priceCost,
   sellAll,
   setActiveZone,
   tickCarts,
   unlockZone,
+  yieldCost,
 } from "../../src/game/state";
 import { ZONES } from "../../src/game/zones";
 
 interface SimEvent {
   t: number;
-  kind: "start" | "harvest" | "sell" | "buyCart" | "unlock" | "switch";
+  kind:
+    | "start"
+    | "harvest"
+    | "sell"
+    | "buyCart"
+    | "buyYield"
+    | "buyGrowth"
+    | "buyPrice"
+    | "buyDrag"
+    | "unlock"
+    | "switch";
   detail: string;
 }
 
@@ -25,31 +48,113 @@ interface RunResult {
   taps: number;
   durationMs: number;
   coinHistory: number[];
-  ripeWaitTotalMs: number;
 }
 
 interface Strategy {
   name: string;
-  harvestIntervalMs: number;
-  forceManualOnNoCart: boolean;
+  /** ms between simulated drag harvests; Infinity = AFK */
+  dragIntervalMs: number;
 }
 
 const TICK_MS = 100;
-const COIN_HISTORY_INTERVAL_MS = 10_000;
-const MAX_CART_LEVEL = 20;
+const COIN_HISTORY_INTERVAL_MS = 60_000;
 
 const STRATEGIES: Strategy[] = [
-  { name: "afk", harvestIntervalMs: Infinity, forceManualOnNoCart: true },
-  { name: "casual-3s", harvestIntervalMs: 3000, forceManualOnNoCart: true },
-  { name: "active-1s", harvestIntervalMs: 1000, forceManualOnNoCart: true },
+  { name: "afk", dragIntervalMs: Infinity },
+  { name: "casual-3s", dragIntervalMs: 3000 },
+  { name: "active-1s", dragIntervalMs: 1000 },
 ];
 
 function fmtTime(ms: number): string {
   const s = Math.floor(ms / 1000);
-  const m = Math.floor(s / 60);
-  const sec = (s % 60).toString().padStart(2, "0");
-  const dec = (Math.floor(ms / 100) % 10).toString();
-  return `${m}:${sec}.${dec}`;
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  if (d > 0) return `${d}d${h}h${m}m`;
+  if (h > 0) return `${h}h${m}m${ss}s`;
+  return `${m}:${ss.toString().padStart(2, "0")}`;
+}
+
+function shortMoney(n: number): string {
+  if (n < 1000) return Math.floor(n).toString();
+  if (n < 1_000_000) return (n / 1000).toFixed(1) + "K";
+  if (n < 1_000_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  if (n < 1_000_000_000_000) return (n / 1_000_000_000).toFixed(1) + "B";
+  return (n / 1_000_000_000_000).toFixed(1) + "T";
+}
+
+function tryUpgradesGreedy(state: GameState, events: SimEvent[], now: number): number {
+  let bought = 0;
+  while (true) {
+    const z = state.zones[state.activeZoneId];
+    const zoneDef = ZONES.find((d) => d.id === state.activeZoneId)!;
+
+    type Option = {
+      cost: number;
+      do: () => boolean;
+      label: SimEvent["kind"];
+      detail: string;
+    };
+
+    const options: Option[] = [];
+    if (z.cartLevel < 50) {
+      options.push({
+        cost: cartCost(z.cartLevel),
+        do: () => buyCart(state, zoneDef.id),
+        label: "buyCart",
+        detail: `${zoneDef.id} Lv${z.cartLevel + 1}`,
+      });
+    }
+    if (z.yieldLevel < 50) {
+      options.push({
+        cost: yieldCost(z.yieldLevel),
+        do: () => buyYield(state, zoneDef.id),
+        label: "buyYield",
+        detail: `${zoneDef.id} Lv${z.yieldLevel + 1}`,
+      });
+    }
+    if (z.growthLevel < 30) {
+      options.push({
+        cost: growthCost(z.growthLevel),
+        do: () => buyGrowth(state, zoneDef.id),
+        label: "buyGrowth",
+        detail: `${zoneDef.id} Lv${z.growthLevel + 1}`,
+      });
+    }
+    if (z.priceLevel < 50) {
+      options.push({
+        cost: priceCost(z.priceLevel),
+        do: () => buyPrice(state, zoneDef.id),
+        label: "buyPrice",
+        detail: `${zoneDef.id} Lv${z.priceLevel + 1}`,
+      });
+    }
+    if (state.dragRadiusLevel < 20) {
+      options.push({
+        cost: dragRadiusCost(state.dragRadiusLevel),
+        do: () => buyDragRadius(state),
+        label: "buyDrag",
+        detail: `Lv${state.dragRadiusLevel + 1}`,
+      });
+    }
+
+    if (options.length === 0) return bought;
+    options.sort((a, b) => a.cost - b.cost);
+    const cheapest = options[0];
+    const reservedForUnlock = ZONES.find(
+      (d) => !state.zones[d.id].unlocked,
+    )?.unlockCost;
+    const cap = reservedForUnlock ?? Infinity;
+    if (cheapest.cost > state.coins) return bought;
+    if (cheapest.cost > cap * 0.4 && state.coins < cap) return bought;
+    if (cheapest.do()) {
+      events.push({ t: now, kind: cheapest.label, detail: cheapest.detail });
+      bought++;
+    } else {
+      return bought;
+    }
+  }
 }
 
 function run(strategy: Strategy, durationMs: number): RunResult {
@@ -62,8 +167,7 @@ function run(strategy: Strategy, durationMs: number): RunResult {
   const coinHistory: number[] = [];
   let taps = 0;
   let now = 0;
-  let lastManualHarvest = -Infinity;
-  let ripeWaitTotalMs = 0;
+  let lastDrag = -Infinity;
 
   while (now < durationMs) {
     for (const z of ZONES) {
@@ -79,47 +183,37 @@ function run(strategy: Strategy, durationMs: number): RunResult {
 
     const activeDef = ZONES.find((z) => z.id === state.activeZoneId)!;
     const activeZone = state.zones[activeDef.id];
+    const grow = effectiveGrowMs(activeDef.growMs, activeZone.growthLevel);
 
-    const ripeCount = activeZone.spots.filter((p) => plotIsRipe(p, activeDef.growMs, now)).length;
-    ripeWaitTotalMs += ripeCount * TICK_MS;
-
-    const wantManual =
-      ripeCount > 0 &&
-      (strategy.forceManualOnNoCart && activeZone.cartLevel === 0
-        ? true
-        : now - lastManualHarvest >= strategy.harvestIntervalMs);
-    if (wantManual) {
-      const n = harvestAllRipe(state, activeDef.id, now);
+    if (activeZone.cartLevel === 0) {
+      if (activeZone.spots.some((p) => plotIsRipe(p, grow, now))) {
+        const n = harvestAllRipe(state, activeDef.id, now);
+        if (n > 0) {
+          taps++;
+          events.push({ t: now, kind: "harvest", detail: `${n}x ${activeDef.id}` });
+        }
+      }
+    } else if (now - lastDrag >= strategy.dragIntervalMs) {
+      const n = harvestInRadius(state, activeDef.id, 0.5, 0.5, dragRadiusFn(state.dragRadiusLevel), now);
       if (n > 0) {
         taps++;
-        lastManualHarvest = now;
-        events.push({ t: now, kind: "harvest", detail: `${n}x ${activeDef.name}` });
+        lastDrag = now;
+        events.push({ t: now, kind: "harvest", detail: `${n}x ${activeDef.id}` });
       }
     }
 
-    const cost = cartCost(activeZone.cartLevel);
-    if (
-      state.coins + activeZone.inventory * activeDef.sellPrice >= cost &&
-      activeZone.cartLevel < MAX_CART_LEVEL
-    ) {
-      if (activeZone.inventory > 0) {
-        const earned = sellAll(state, activeDef.id);
-        taps++;
-        events.push({ t: now, kind: "sell", detail: `+${earned}` });
-      }
-      if (state.coins >= cartCost(activeZone.cartLevel) && buyCart(state, activeDef.id)) {
-        taps++;
-        events.push({ t: now, kind: "buyCart", detail: `${activeDef.name} Lv${activeZone.cartLevel}` });
-      }
-    }
-
-    const nextZoneCost = ZONES.find((z) => !state.zones[z.id].unlocked)?.unlockCost ?? Infinity;
-    const sellThreshold = Math.min(nextZoneCost, 25);
-    if (activeZone.inventory * activeDef.sellPrice >= sellThreshold) {
+    const priceMult = effectivePriceMult(activeZone.priceLevel);
+    const sellThreshold = Math.max(10, activeDef.unlockCost * 0.3);
+    if (activeZone.inventory * activeDef.sellPrice * priceMult >= sellThreshold) {
       const earned = sellAll(state, activeDef.id);
-      taps++;
-      events.push({ t: now, kind: "sell", detail: `+${earned}` });
+      if (earned > 0) {
+        taps++;
+        events.push({ t: now, kind: "sell", detail: `+${shortMoney(earned)}` });
+      }
     }
+
+    const bought = tryUpgradesGreedy(state, events, now);
+    taps += bought;
 
     tickCarts(state, now, TICK_MS);
 
@@ -134,62 +228,42 @@ function run(strategy: Strategy, durationMs: number): RunResult {
     if (state.zones[z.id].inventory > 0) sellAll(state, z.id);
   }
 
-  return { name: strategy.name, events, finalState: state, taps, durationMs, coinHistory, ripeWaitTotalMs };
+  return { name: strategy.name, events, finalState: state, taps, durationMs, coinHistory };
 }
 
 function summarize(r: RunResult): void {
   const e = r.events;
-  const find = (kind: SimEvent["kind"], pred?: (ev: SimEvent) => boolean) =>
-    e.find((ev) => ev.kind === kind && (!pred || pred(ev)));
-
-  const totalCartLv = ZONES.reduce((s, z) => s + r.finalState.zones[z.id].cartLevel, 0);
 
   console.log("");
   console.log(`=============== Strategy: ${r.name} ===============`);
-  console.log(`Duration:        ${fmtTime(r.durationMs)}`);
-  console.log(`Total taps:      ${r.taps}  (${(r.taps / (r.durationMs / 60_000)).toFixed(1)}/min)`);
-  console.log(`Final coins:     ${Math.floor(r.finalState.coins)}`);
-  console.log(`Total cart lvls: ${totalCartLv}`);
-  console.log(`Ripe wait time:  ${(r.ripeWaitTotalMs / 1000).toFixed(0)}s (lower = less wasted potential)`);
+  console.log(`Duration:     ${fmtTime(r.durationMs)}`);
+  console.log(`Taps:         ${r.taps}`);
+  console.log(`Final coins:  ${shortMoney(r.finalState.coins)}`);
+
   console.log("");
-  console.log("Milestones:");
-  const milestones: Array<[string, SimEvent | undefined]> = [
-    ["First harvest", find("harvest")],
-    ["First sell", find("sell")],
-    ["First cart Lv1", find("buyCart")],
-    ["Wheat cart Lv2", e.find((ev) => ev.kind === "buyCart" && ev.detail.includes("Wheat") && ev.detail.includes("Lv2"))],
-    ["Carrots unlocked", find("unlock", (ev) => ev.detail.toLowerCase().includes("carrot"))],
-    ["First Carrot harvest", find("harvest", (ev) => ev.detail.toLowerCase().includes("carrot"))],
-    ["Carrot cart Lv1", find("buyCart", (ev) => ev.detail.toLowerCase().includes("carrot"))],
-    ["Carrot cart Lv3", e.find((ev) => ev.kind === "buyCart" && ev.detail.includes("Carrot") && ev.detail.includes("Lv3"))],
-  ];
-  for (const [label, ev] of milestones) {
-    console.log(`  ${label.padEnd(24)} ${ev ? fmtTime(ev.t) : "(not reached)"}`);
+  console.log("Zone unlocks:");
+  for (const z of ZONES) {
+    const ev = e.find((x) => x.kind === "unlock" && x.detail === z.name);
+    const zs = r.finalState.zones[z.id];
+    const unlocked = zs.unlocked;
+    if (!unlocked && z.unlockCost > 0) continue;
+    const t = ev ? fmtTime(ev.t) : "start";
+    console.log(
+      `  ${z.name.padEnd(22)} ${t.padStart(10)}  cart=${zs.cartLevel.toString().padStart(2)}  yld=${zs.yieldLevel.toString().padStart(2)}  spd=${zs.growthLevel.toString().padStart(2)}  pri=${zs.priceLevel.toString().padStart(2)}`,
+    );
   }
 
   console.log("");
-  console.log("Coins over time (every 10s):");
+  console.log("Coins per minute:");
   const max = Math.max(...r.coinHistory, 1);
-  for (let i = 0; i < r.coinHistory.length; i += 6) {
+  for (let i = 0; i < r.coinHistory.length; i++) {
     const v = r.coinHistory[i];
     const bar = "█".repeat(Math.floor((v / max) * 50));
-    console.log(`  ${fmtTime(i * COIN_HISTORY_INTERVAL_MS).padStart(8)}  ${v.toString().padStart(6)}  ${bar}`);
+    console.log(`  ${fmtTime(i * COIN_HISTORY_INTERVAL_MS).padStart(10)}  ${shortMoney(v).padStart(10)}  ${bar}`);
   }
-
-  console.log("");
-  console.log("Stagnant periods (>30s gap between meaningful events):");
-  let last = 0;
-  const stagnant: Array<[number, number]> = [];
-  for (const ev of e) {
-    if (ev.kind === "switch" || ev.kind === "start") continue;
-    if (ev.t - last > 30_000) stagnant.push([last, ev.t]);
-    last = ev.t;
-  }
-  if (stagnant.length === 0) console.log("  none");
-  else for (const [a, b] of stagnant) console.log(`  ${fmtTime(a)} -> ${fmtTime(b)} (${Math.floor((b - a) / 1000)}s)`);
 }
 
-const minutes = Number(process.argv[2] ?? 15);
+const minutes = Number(process.argv[2] ?? 60);
 for (const s of STRATEGIES) {
   summarize(run(s, minutes * 60 * 1000));
 }

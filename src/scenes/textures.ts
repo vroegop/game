@@ -403,13 +403,13 @@ export function pickStageTexture(zoneId: string, progress: number, ripe: boolean
   return `${prefix}-s3`;
 }
 
-export function pickCropSpriteKey(zoneId: string, progress: number, ripe: boolean): string {
-  const prefix = zoneId === "carrots" ? "carrot" : "wheat";
-  if (ripe) return `crop-${prefix}-s3`;
+export function pickCropSpriteKey(shape: "grain" | "veg", progress: number, ripe: boolean): string {
+  const prefix = shape === "grain" ? "crop-wheat" : "crop-carrot";
+  if (ripe) return `${prefix}-s3`;
   if (progress < 0.2) return "crop-empty";
-  if (progress < 0.55) return `crop-${prefix}-s1`;
-  if (progress < 0.85) return `crop-${prefix}-s2`;
-  return `crop-${prefix}-s3`;
+  if (progress < 0.55) return `${prefix}-s1`;
+  if (progress < 0.85) return `${prefix}-s2`;
+  return `${prefix}-s3`;
 }
 
 const CROP_SPRITE_W = 16;

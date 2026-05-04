@@ -3,22 +3,30 @@ import { ZONES, ZoneDef } from "../game/zones";
 import {
   buyCart,
   buyDragRadius,
+  buyGrowth,
+  buyPrice,
+  buyYield,
   cartCost,
   cartRadius as cartRadiusFn,
   cartSpeed as cartSpeedFn,
   dragRadius as dragRadiusFn,
   dragRadiusCost,
+  effectiveGrowMs,
+  effectivePriceMult,
+  effectiveYield,
   GameState,
-  harvestAllRipe,
+  growthCost,
   harvestInRadius,
   loadState,
   plotIsRipe,
   plotProgress,
+  priceCost,
   saveState,
   sellAll,
   setActiveZone,
   tickCarts,
   unlockZone,
+  yieldCost,
 } from "../game/state";
 import { generatePixelTextures, pickCropSpriteKey } from "./textures";
 
@@ -92,6 +100,9 @@ export class GameScene extends Phaser.Scene {
 
   private btnSell!: IconButton;
   private btnCart!: IconButton;
+  private btnYield!: IconButton;
+  private btnGrowth!: IconButton;
+  private btnPrice!: IconButton;
   private btnDrag!: IconButton;
   private btnUnlock!: IconButton;
 
@@ -162,6 +173,9 @@ export class GameScene extends Phaser.Scene {
 
     this.btnSell = this.makeIconButton("💰", "btn-bg", () => this.onSell());
     this.btnCart = this.makeIconButton("🚜", "btn-bg-accent", () => this.onBuyCart());
+    this.btnYield = this.makeIconButton("📦", "btn-bg-accent", () => this.onBuyYield());
+    this.btnGrowth = this.makeIconButton("⏱", "btn-bg-accent", () => this.onBuyGrowth());
+    this.btnPrice = this.makeIconButton("💲", "btn-bg-accent", () => this.onBuyPrice());
     this.btnDrag = this.makeIconButton("✋", "btn-bg-accent", () => this.onBuyDrag());
     this.btnUnlock = this.makeIconButton("🔓", "btn-bg-warn", () => this.onUnlock());
 
@@ -223,15 +237,27 @@ export class GameScene extends Phaser.Scene {
     this.titleText.setPosition(Math.floor(w / 2), fieldBottom + 4);
     this.statusText.setPosition(Math.floor(w / 2), fieldBottom + 22);
 
-    const buttons = [this.btnSell, this.btnCart, this.btnDrag, this.btnUnlock];
+    const buttons = [
+      this.btnSell,
+      this.btnCart,
+      this.btnYield,
+      this.btnGrowth,
+      this.btnPrice,
+      this.btnDrag,
+      this.btnUnlock,
+    ];
     const visible = buttons.filter((b) => b.container.visible);
-    const btnSize = 60;
-    const totalBtnW = visible.length * btnSize + Math.max(0, visible.length - 1) * 14;
+    const maxRowW = w - 16;
+    const gap = 8;
+    const desired = 56;
+    const fitSize = Math.floor((maxRowW - (visible.length - 1) * gap) / Math.max(1, visible.length));
+    const btnSize = Math.max(40, Math.min(desired, fitSize));
+    const totalBtnW = visible.length * btnSize + Math.max(0, visible.length - 1) * gap;
     const actionY = h - Math.floor(actionH / 2);
     let bx = Math.floor((w - totalBtnW) / 2) + Math.floor(btnSize / 2);
     for (const b of visible) {
       this.placeIconButton(b, bx, actionY, btnSize);
-      bx += btnSize + 14;
+      bx += btnSize + gap;
     }
 
     this.layoutSpots();
@@ -239,15 +265,21 @@ export class GameScene extends Phaser.Scene {
   };
 
   private layoutTabs(w: number, tabsH: number) {
-    const tabSize = 48;
-    const gap = 10;
-    const totalW = this.tabs.length * tabSize + (this.tabs.length - 1) * gap;
+    const visible = this.tabs.filter((t) => t.container.visible);
+    if (visible.length === 0) return;
+    const desired = 48;
+    const gap = 8;
+    const fitSize = Math.floor((w - 16 - (visible.length - 1) * gap) / visible.length);
+    const tabSize = Math.max(34, Math.min(desired, fitSize));
+    const totalW = visible.length * tabSize + (visible.length - 1) * gap;
     let x = Math.floor((w - totalW) / 2) + Math.floor(tabSize / 2);
     const y = Math.floor(tabsH / 2);
-    for (const tab of this.tabs) {
+    for (const tab of visible) {
       tab.container.setPosition(x, y);
       tab.bg.setDisplaySize(tabSize, tabSize);
-      tab.icon.setFontSize(24);
+      tab.icon.setFontSize(Math.max(16, Math.floor(tabSize * 0.5)));
+      tab.price.setFontSize(Math.max(8, Math.floor(tabSize * 0.22)));
+      tab.price.setY(Math.floor(tabSize * 0.3));
       x += tabSize + gap;
     }
   }
@@ -514,6 +546,27 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private onBuyYield() {
+    const zoneDef = this.activeZoneDef();
+    if (buyYield(this.state, zoneDef.id)) {
+      this.spawnFloat(this.btnYield.container.x, this.btnYield.container.y - 32, "Yield+1", COLOR_GAIN);
+    }
+  }
+
+  private onBuyGrowth() {
+    const zoneDef = this.activeZoneDef();
+    if (buyGrowth(this.state, zoneDef.id)) {
+      this.spawnFloat(this.btnGrowth.container.x, this.btnGrowth.container.y - 32, "Speed+1", COLOR_GAIN);
+    }
+  }
+
+  private onBuyPrice() {
+    const zoneDef = this.activeZoneDef();
+    if (buyPrice(this.state, zoneDef.id)) {
+      this.spawnFloat(this.btnPrice.container.x, this.btnPrice.container.y - 32, "Price+1", COLOR_GAIN);
+    }
+  }
+
   private onBuyDrag() {
     if (buyDragRadius(this.state)) {
       this.spawnFloat(this.btnDrag.container.x, this.btnDrag.container.y - 32, "Reach+1", COLOR_GAIN);
@@ -538,8 +591,19 @@ export class GameScene extends Phaser.Scene {
     this.coinText.setText(formatNumber(this.state.coins));
     this.rateText.setText(`+${formatNumber(this.computeCoinsPerSec())}/s`);
 
-    for (const tab of this.tabs) {
+    let firstLockedIdx = -1;
+    for (let i = 0; i < ZONES.length; i++) {
+      if (!this.state.zones[ZONES[i].id].unlocked) {
+        firstLockedIdx = i;
+        break;
+      }
+    }
+    for (let i = 0; i < this.tabs.length; i++) {
+      const tab = this.tabs[i];
       const z = this.state.zones[tab.def.id];
+      const showThis = z.unlocked || i === firstLockedIdx;
+      tab.container.setVisible(showThis);
+      if (!showThis) continue;
       const isActive = tab.def.id === this.state.activeZoneId;
       const canAfford = this.state.coins >= tab.def.unlockCost;
       let key: string;
@@ -564,17 +628,22 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    this.titleText.setText(`${zoneDef.name.toUpperCase()}  -  BASKET ${zone.inventory}`);
+    const yieldStr = effectiveYield(zone.yieldLevel) > 1 ? ` x${effectiveYield(zone.yieldLevel)}` : "";
+    this.titleText.setText(
+      `${zoneDef.name.toUpperCase()}  basket ${formatNumber(zone.inventory)}${yieldStr}`,
+    );
 
     let ripeCount = 0;
+    const grow = effectiveGrowMs(zoneDef.growMs, zone.growthLevel);
     for (let i = 0; i < this.spots.length && i < zone.spots.length; i++) {
       const spot = zone.spots[i];
-      const ripe = plotIsRipe(spot, zoneDef.growMs, now);
-      const progress = plotProgress(spot, zoneDef.growMs, now);
+      const ripe = plotIsRipe(spot, grow, now);
+      const progress = plotProgress(spot, grow, now);
       const key = !zone.unlocked
         ? "crop-empty"
-        : pickCropSpriteKey(zoneDef.id, progress, ripe);
+        : pickCropSpriteKey(zoneDef.shape, progress, ripe);
       this.spots[i].sprite.setTexture(key);
+      this.spots[i].sprite.setTint(zoneDef.tint);
       this.spots[i].sprite.setVisible(zone.unlocked && key !== "crop-empty");
       this.spots[i].bumpFactor = Phaser.Math.Linear(this.spots[i].bumpFactor, 1, 0.18);
       if (ripe) ripeCount += 1;
@@ -595,25 +664,46 @@ export class GameScene extends Phaser.Scene {
       this.btnUnlock.container.setVisible(false);
       this.btnSell.container.setVisible(true);
       this.btnCart.container.setVisible(true);
+      this.btnYield.container.setVisible(true);
+      this.btnGrowth.container.setVisible(true);
+      this.btnPrice.container.setVisible(true);
       this.btnDrag.container.setVisible(true);
 
+      const priceMult = effectivePriceMult(zone.priceLevel);
       this.setButtonEnabled(this.btnSell, zone.inventory > 0);
       this.setButtonBadge(
         this.btnSell,
-        zone.inventory > 0 ? `${formatNumber(zone.inventory * zoneDef.sellPrice)}` : "",
+        zone.inventory > 0
+          ? `${formatNumber(Math.floor(zone.inventory * zoneDef.sellPrice * priceMult))}`
+          : "",
       );
 
       const ccost = cartCost(zone.cartLevel);
       this.setButtonEnabled(this.btnCart, this.state.coins >= ccost);
       this.setButtonBadge(this.btnCart, formatNumber(ccost));
 
+      const ycost = yieldCost(zone.yieldLevel);
+      this.setButtonEnabled(this.btnYield, this.state.coins >= ycost && zone.yieldLevel < 50);
+      this.setButtonBadge(this.btnYield, zone.yieldLevel < 50 ? formatNumber(ycost) : "MAX");
+
+      const gcost = growthCost(zone.growthLevel);
+      this.setButtonEnabled(this.btnGrowth, this.state.coins >= gcost && zone.growthLevel < 30);
+      this.setButtonBadge(this.btnGrowth, zone.growthLevel < 30 ? formatNumber(gcost) : "MAX");
+
+      const pcost = priceCost(zone.priceLevel);
+      this.setButtonEnabled(this.btnPrice, this.state.coins >= pcost && zone.priceLevel < 50);
+      this.setButtonBadge(this.btnPrice, zone.priceLevel < 50 ? formatNumber(pcost) : "MAX");
+
       const dcost = dragRadiusCost(this.state.dragRadiusLevel);
-      this.setButtonEnabled(this.btnDrag, this.state.coins >= dcost);
-      this.setButtonBadge(this.btnDrag, formatNumber(dcost));
+      this.setButtonEnabled(this.btnDrag, this.state.coins >= dcost && this.state.dragRadiusLevel < 20);
+      this.setButtonBadge(this.btnDrag, this.state.dragRadiusLevel < 20 ? formatNumber(dcost) : "MAX");
     } else {
       this.btnUnlock.container.setVisible(true);
       this.btnSell.container.setVisible(false);
       this.btnCart.container.setVisible(false);
+      this.btnYield.container.setVisible(false);
+      this.btnGrowth.container.setVisible(false);
+      this.btnPrice.container.setVisible(false);
       this.btnDrag.container.setVisible(false);
 
       this.setButtonEnabled(this.btnUnlock, this.state.coins >= zoneDef.unlockCost);
