@@ -33,17 +33,17 @@ export interface GameState {
 
 const STORAGE_KEY = "idle-farm-save-v2";
 const CART_BASE_COST = 30;
-const CART_COST_MULT = 2.8;
+const CART_COST_MULT = 1.7;
 const CART_BASE_SPEED = 0.07;
-const CART_BASE_RADIUS = 0.08;
+const CART_BASE_RADIUS = 0.075;
 const DRAG_BASE_RADIUS = 0.085;
 const DRAG_RADIUS_INCREMENT = 0.018;
 const DRAG_RADIUS_BASE_COST = 40;
 const DRAG_RADIUS_COST_MULT = 2.6;
 
-export const SPOTS_COLS = 7;
-export const SPOTS_ROWS = 5;
-export const SPOTS_PER_ZONE = SPOTS_COLS * SPOTS_ROWS;
+export const SPOTS_TARGET = 32;
+const SPOT_MIN_DISTANCE = 0.135;
+const SPOT_FIELD_MARGIN = 0.05;
 
 function hashStr(s: string): number {
   let h = 5381 >>> 0;
@@ -59,25 +59,27 @@ function makePRNG(seed: number): () => number {
   };
 }
 
-function clamp(n: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, n));
-}
-
 export function generateSpots(zoneId: string): CropSpot[] {
-  const spots: CropSpot[] = [];
   const rng = makePRNG(hashStr(zoneId));
-  for (let r = 0; r < SPOTS_ROWS; r++) {
-    for (let c = 0; c < SPOTS_COLS; c++) {
-      const baseX = (c + 0.5) / SPOTS_COLS;
-      const baseY = (r + 0.5) / SPOTS_ROWS;
-      const jitterX = (rng() - 0.5) * 0.04;
-      const jitterY = (rng() - 0.5) * 0.025;
-      spots.push({
-        x: clamp(baseX + jitterX, 0.04, 0.96),
-        y: clamp(baseY + jitterY, 0.06, 0.94),
-        plantedAt: 0,
-      });
+  const spots: CropSpot[] = [];
+  const minD2 = SPOT_MIN_DISTANCE * SPOT_MIN_DISTANCE;
+  const lo = SPOT_FIELD_MARGIN;
+  const hi = 1 - SPOT_FIELD_MARGIN;
+  let attempts = 0;
+  while (spots.length < SPOTS_TARGET && attempts < 5000) {
+    attempts++;
+    const x = lo + rng() * (hi - lo);
+    const y = lo + rng() * (hi - lo);
+    let ok = true;
+    for (const s of spots) {
+      const dx = s.x - x;
+      const dy = s.y - y;
+      if (dx * dx + dy * dy < minD2) {
+        ok = false;
+        break;
+      }
     }
+    if (ok) spots.push({ x, y, plantedAt: 0 });
   }
   return spots;
 }
@@ -223,11 +225,19 @@ export function cartCost(level: number): number {
 }
 
 export function cartSpeed(level: number): number {
-  return CART_BASE_SPEED * (1 + 0.12 * Math.max(0, level - 1));
+  return CART_BASE_SPEED * (1 + 0.15 * Math.max(0, level - 1));
 }
 
 export function cartRadius(level: number): number {
-  return CART_BASE_RADIUS * (1 + 0.08 * Math.max(0, level - 1));
+  return CART_BASE_RADIUS * (1 + 0.07 * Math.max(0, level - 1));
+}
+
+export function cartCountFor(level: number): number {
+  if (level <= 0) return 0;
+  if (level < 12) return 1;
+  if (level < 24) return 2;
+  if (level < 40) return 3;
+  return 4;
 }
 
 export function buyCart(state: GameState, zoneId: string): boolean {
@@ -237,16 +247,19 @@ export function buyCart(state: GameState, zoneId: string): boolean {
   if (state.coins < cost) return false;
   state.coins -= cost;
   zone.cartLevel += 1;
-  const angle = Math.random() * Math.PI * 2;
-  const speed = cartSpeed(zone.cartLevel);
-  zone.carts.push({
-    x: 0.2 + Math.random() * 0.6,
-    y: 0.2 + Math.random() * 0.6,
-    vx: Math.cos(angle) * speed,
-    vy: Math.sin(angle) * speed,
-    facing: angle,
-    changeDirT: 0,
-  });
+  const targetCount = cartCountFor(zone.cartLevel);
+  while (zone.carts.length < targetCount) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = cartSpeed(zone.cartLevel);
+    zone.carts.push({
+      x: 0.2 + Math.random() * 0.6,
+      y: 0.2 + Math.random() * 0.6,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      facing: angle,
+      changeDirT: 0,
+    });
+  }
   return true;
 }
 
@@ -298,20 +311,21 @@ export function tickCarts(state: GameState, now: number, deltaMs: number): void 
       cart.vy = -Math.abs(cart.vy);
     }
 
-    cart.facing = Math.atan2(cart.vy, cart.vx);
     cart.changeDirT += deltaMs;
-    if (cart.changeDirT > 1800 + Math.random() * 1700) {
+    const recheck = cart.changeDirT > 250;
+    if (recheck) {
       cart.changeDirT = 0;
       const nearest = findNearestRipe(zone, cart.x, cart.y, zoneDef.growMs, now);
       let angle: number;
-      if (nearest && Math.random() < 0.7) {
+      if (nearest) {
         angle = Math.atan2(nearest.y - cart.y, nearest.x - cart.x);
       } else {
-        angle = Math.random() * Math.PI * 2;
+        angle = Math.atan2(cart.vy, cart.vx) + (Math.random() - 0.5) * 0.6;
       }
       cart.vx = Math.cos(angle) * speed;
       cart.vy = Math.sin(angle) * speed;
     }
+    cart.facing = Math.atan2(cart.vy, cart.vx);
 
     for (const spot of zone.spots) {
       if (!plotIsRipe(spot, zoneDef.growMs, now)) continue;
@@ -367,7 +381,7 @@ function applyOfflineProgress(state: GameState): void {
       const r = cartRadius(zone.cartLevel);
       const speed = cartSpeed(zone.cartLevel);
       const sweptAreaPerSec = 2 * r * speed;
-      const cropDensity = SPOTS_PER_ZONE / 1.0;
+      const cropDensity = zone.spots.length;
       const harvestsPerSec = sweptAreaPerSec * cropDensity * 0.04;
       const offlineHarvests = Math.floor(
         (cappedMs / 1000) * harvestsPerSec * zone.cartLevel * 0.5,

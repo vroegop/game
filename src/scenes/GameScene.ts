@@ -113,7 +113,7 @@ export class GameScene extends Phaser.Scene {
     this.fieldContainer = this.add.container(0, 0);
 
     this.dragRing = this.add.image(0, 0, "drag-ring").setOrigin(0.5).setVisible(false);
-    this.dragRing.setAlpha(0.85);
+    this.dragRing.setAlpha(0.07);
     this.fieldContainer.add(this.dragRing);
 
     this.headerBg = this.add.image(0, 0, "panel-bg").setOrigin(0, 0);
@@ -361,7 +361,7 @@ export class GameScene extends Phaser.Scene {
     const zone = this.state.zones[zoneDef.id];
     for (let i = 0; i < zone.carts.length; i++) {
       const glow = this.add.image(0, 0, "drag-ring").setOrigin(0.5);
-      glow.setAlpha(0.18);
+      glow.setAlpha(0.05);
       const sprite = this.add.image(0, 0, "cart").setOrigin(0.5);
       this.fieldContainer.add([glow, sprite]);
       this.cartViews.push({ sprite, glow });

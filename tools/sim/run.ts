@@ -36,7 +36,7 @@ interface Strategy {
 
 const TICK_MS = 100;
 const COIN_HISTORY_INTERVAL_MS = 10_000;
-const MAX_CART_LEVEL = 6;
+const MAX_CART_LEVEL = 20;
 
 const STRATEGIES: Strategy[] = [
   { name: "afk", harvestIntervalMs: Infinity, forceManualOnNoCart: true },

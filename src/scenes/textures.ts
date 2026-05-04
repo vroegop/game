@@ -619,16 +619,14 @@ function generateDragRing(scene: Phaser.Scene, key: string): void {
   const H = 64;
   const cx = W / 2;
   const cy = H / 2;
-  const radius = 30;
-  const inner = 26;
+  const radius = 31;
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const dx = x + 0.5 - cx;
       const dy = y + 0.5 - cy;
       const d = Math.sqrt(dx * dx + dy * dy);
-      if (d <= radius && d >= inner) {
-        const isOuterEdge = d > radius - 1.2 || d < inner + 1.2;
-        g.fillStyle(isOuterEdge ? 0xfff080 : 0xffd040, 1);
+      if (d <= radius) {
+        g.fillStyle(0xffffff, 1);
         g.fillRect(x, y, 1, 1);
       }
     }
